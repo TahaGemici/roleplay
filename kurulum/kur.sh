@@ -1,7 +1,7 @@
 #!/bin/sh
 # Zar Masası'nı systemd-nspawn konteyneri olarak kurar, başlatır ve günceller. Hepsi aynı komut:
 #
-#   curl -fsSL https://github.com/KULLANICI/zar-masasi/releases/latest/download/kur.sh | sudo sh
+#   curl -fsSL https://github.com/TahaGemici/roleplay/releases/latest/download/kur.sh | sudo sh
 #
 # GitHub'daki en son sürümü indirir, SHA-256 ile doğrular, çalışanın yerine koyar ve yeniden başlatır.
 #   ... | sudo sh -s v42               belirli bir sürüm (ör. geri dönmek için)

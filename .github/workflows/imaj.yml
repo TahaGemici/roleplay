@@ -1,7 +1,7 @@
 # Zar Masası: main'e her push'ta test, imaj, Ubuntu'da deneme ve yeni bir GitHub sürümü (v1, v2, ...).
 #
 # Sunucuda kurmak, başlatmak ve güncellemek (repo gerekmez, yalnızca son sürüm indirilir):
-#   curl -fsSL https://github.com/KULLANICI/zar-masasi/releases/latest/download/kur.sh | sudo sh
+#   curl -fsSL https://github.com/TahaGemici/roleplay/releases/latest/download/kur.sh | sudo sh
 name: imaj
 
 on:
