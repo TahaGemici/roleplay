@@ -5,6 +5,8 @@
 #include <string.h>
 
 const char *const esya_siniflari[] = { "silah", "iksir", "../kotu", NULL };
+const Esya yumruk = { .ad = "Yumruk", .sinif = "silah" };
+const char *const buyuler[] = { "Şifa", "Yıldırım", NULL };
 
 void her_tur(Oyuncu *o)
 {
@@ -45,4 +47,13 @@ int hareket(Oyuncu *o, float x, float y)
     }
     o->enerji -= d;
     return 1;
+}
+
+/* Şifa 3 can verir, Yıldırım 4 hasar; ikisi de 1 enerji */
+void buyu(Oyuncu *yapan, Oyuncu *hedef, const char *buyu_adi)
+{
+    duyur("BUYU: %s -> %s [%s] can %.0f", yapan->ad, hedef->ad, buyu_adi, hedef->can);
+    yapan->enerji -= 1;
+    if (strcmp(buyu_adi, "Şifa") == 0) hedef->can += 3;
+    else hedef->can -= 4;
 }

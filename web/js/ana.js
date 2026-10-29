@@ -5,6 +5,7 @@ import { turKartiOlustur, durumKartiCiz } from './tur.js';
 import { envanterCiz, esyaKarti, grupla } from './envanter.js';
 import { secimPenceresi } from './pencere.js';
 import { zarSimgesi } from './zar-sekilleri.js';
+import { gorunumPenceresi } from './gorunum.js';
 
 // /gm GM ekranını, kök adres oyuncu ekranını açar.
 const rol = location.pathname.replace(/\/+$/, '') === '/gm' ? 'gm' : 'oyuncu';
@@ -18,6 +19,7 @@ let bekleme = 1000;
 let okunmamis = 0;
 let siraBende = false;
 let sonIstek = null;
+let gorunumAcik = null; // açık görünüm penceresi (yeni durumda yenilenir)
 let harita, kayit, tur, gm, dosyalar;
 
 function gonder(mesaj) {
@@ -164,19 +166,52 @@ async function yenidenDene() {
   }
 }
 
-// ------------------------------------------------------------ saldırı seçimi (oyuncu)
+// ------------------------------------------------------------ saldırı ve büyü seçimi (oyuncu)
 
-async function saldiriSec(hedefId) {
+/* Bir karaktere tıklandı: başkasıysa saldır ya da büyü yap, kendisiyse büyü yap */
+async function etkilesimSec(hedefId) {
   if (!durum || durum.ben.gm) return;
   const hedef = harita.token(hedefId);
   if (!hedef) return;
   const s = durum.sira;
-  if (!s.aktif) return bildir('Turlar başlamadı; sıran gelince saldırabilirsin.');
+  if (!s.aktif) return bildir('Turlar başlamadı; sıran gelince saldırabilir ya da büyü yapabilirsin.');
   if (!s.sirada_ben) return bildir('Sıra sende değil.');
-  if (durum.olu) return bildir('Ölüler saldıramaz.');
-  if (hedef.olu) return bildir(`${hedef.ad} zaten ölü.`);
+  if (durum.olu) return bildir('Öldün; GM seni diriltebilir.');
+  if (hedef.olu) return bildir(`${hedef.ad} ölü.`);
   if (!(durum.statlar.enerji > 0)) return bildir('Enerjin kalmadı.');
-  if (!durum.envanter.length) return bildir('Saldırmak için envanterinde bir eşya olmalı. GM sana eşya verebilir.');
+  if (hedef.ben) return buyuSec(hedef);
+  const secim = await secimPenceresi({
+    baslik: hedef.ad,
+    icerik: (sec) => [
+      h('p', { class: 'modal-text', text: 'Ne yapacaksın? İsteğin GM\'e gider; onaylarsa olur.' }),
+      h(
+        'div',
+        { class: 'choice-row' },
+        h('button', { class: 'choice is-attack', type: 'button', onclick: () => sec('saldir') }, h('span', { class: 'choice-icon', 'aria-hidden': 'true', text: '⚔' }), h('b', { text: 'Saldır' }), h('small', { text: 'Envanterindeki bir eşyayla' })),
+        h('button', { class: 'choice is-spell', type: 'button', onclick: () => sec('buyu') }, h('span', { class: 'choice-icon', 'aria-hidden': 'true', text: '✦' }), h('b', { text: 'Büyü yap' }), h('small', { text: 'Büyü listesinden' })),
+      ),
+    ],
+  });
+  if (secim === 'saldir') saldiriSec(hedef);
+  else if (secim === 'buyu') buyuSec(hedef);
+}
+
+async function buyuSec(hedef) {
+  const liste = durum.buyuler || [];
+  if (!liste.length) return bildir('Kurallarda büyü yok (kurallar.c\'deki buyuler listesi boş).');
+  const kendim = hedef.id === durum.ben.id;
+  const secim = await secimPenceresi({
+    baslik: kendim ? 'Kendine büyü yap' : `Büyü: ${hedef.ad}`,
+    icerik: (sec) => [
+      h('p', { class: 'modal-text', text: 'Hangi büyüyü yapacaksın? İsteğin GM\'e gider; onaylarsa olur.' }),
+      h('ul', { class: 'spell-list' }, ...liste.map((b) => h('li', {}, h('button', { class: 'spell', type: 'button', onclick: () => sec(b) }, h('span', { class: 'spell-icon', 'aria-hidden': 'true', text: '✦' }), h('span', { text: b }))))),
+    ],
+  });
+  if (secim) gonder({ t: 'buyu', hedef: hedef.id, buyu: secim });
+}
+
+async function saldiriSec(hedef) {
+  const hedefId = hedef.id;
   const gruplar = grupla(durum.envanter);
   const secim = await secimPenceresi({
     baslik: `Saldır: ${hedef.ad}`,
@@ -203,6 +238,7 @@ function kur() {
     dunya: $('#dunya'),
     resim: $('#harita-resim'),
     izgara: $('#izgara'),
+    yerKatmani: $('#yerdekiler'),
     tokenKatmani: $('#tokenler'),
     sisTuvali: $('#sis'),
     katman: $('#katman'),
@@ -215,8 +251,10 @@ function kur() {
   harita.on('tasi', (id, x, y) => gonder({ t: 'tasi', id, x, y }));
   harita.on('isaret', (x, y, odak) => gonder({ t: 'isaret', x, y, odak }));
   harita.on('sec', (id) => gm?.secimDegisti(id));
-  harita.on('saldir', (id) => saldiriSec(id));
+  harita.on('etkiles', (id) => etkilesimSec(id));
   harita.on('istekTasi', () => gm?.istekTasindi());
+  harita.on('esyaTasi', (id, x, y) => gonder({ t: 'esya_birak', kaynak: 'yer', id, x, y }));
+  harita.on('esyaTikla', (id) => gm?.yerEsyasiTiklandi(id));
 
   kayit = kayitOlustur($('#kayit'));
   tur = turKartiOlustur($('#tur-karti'), { gonder });
@@ -230,17 +268,21 @@ function kur() {
   }
   $('.tray').addEventListener('click', (e) => {
     const b = e.target.closest('[data-roll]');
-    if (b) gonder({ t: 'zar', ifade: b.dataset.roll, gizli: $('#zar-gizli').checked });
+    if (b) gonder({ t: 'zar', ifade: b.dataset.roll });
   });
   $('#zar-formu').addEventListener('submit', (e) => {
     e.preventDefault();
     const ifade = $('#zar-ifade').value.trim();
     if (!ifade) return $('#zar-ifade').focus();
-    gonder({ t: 'zar', ifade, gizli: $('#zar-gizli').checked });
+    gonder({ t: 'zar', ifade });
     $('#zar-ifade').select();
   });
-  $('#gizli-etiket').title =
-    rol === 'gm' ? 'Sonucu yalnızca GM görür; oyuncular gizli bir zar atıldığını görür.' : 'Sonucu yalnızca sen ve GM görürsünüz; diğerleri gizli bir zar atıldığını görür.';
+
+  // Oyuncunun kendi görünümü ve envanterinden yere bırakma
+  $('#durum-karti').addEventListener('click', (e) => {
+    if (!e.target.closest('[data-gorunum]') || !durum || durum.ben.gm) return;
+    gorunumAcik = gorunumPenceresi({ karakterAl: () => ({ ...durum.ben, npc: false }), durumAl: () => durum, gonder, gm: false });
+  });
 
   // Sekmeler
   const sekmeSec = (ad) => {
@@ -281,7 +323,13 @@ function kur() {
 
   if (rol === 'gm') {
     import('./gm.js').then(({ gmPaneliOlustur }) => {
-      gm = gmPaneliOlustur({ gonder, harita });
+      gm = gmPaneliOlustur({
+        gonder,
+        harita,
+        gorunumAc: (id) => {
+          gorunumAcik = gorunumPenceresi({ karakterAl: () => durum?.karakterler.find((k) => k.id === id), durumAl: () => durum, gonder, gm: true });
+        },
+      });
       if (durum) gm.ayarla(durum);
     });
     import('./dosyalar.js').then(({ dosyaYoneticisiOlustur }) => {
@@ -341,9 +389,9 @@ function kimlerCiz() {
   );
 }
 
-// GM'in durumunda tokenler karakter listesinden gelir
+// GM'in durumunda tokenler karakter listesinden gelir (haritaya yerleşmiş olanlar)
 function normallestir(m) {
-  if (m.ben.gm) m.tokenler = m.harita ? m.karakterler.map((k) => ({ ...k, canli: true, ben: false })) : [];
+  if (m.ben.gm) m.tokenler = m.harita ? m.karakterler.filter((k) => k.yerde).map((k) => ({ ...k, canli: true, ben: false })) : [];
   return m;
 }
 
@@ -352,7 +400,16 @@ function istekBildirimi(m) {
   const i = m.istek;
   if (durum && i && i.id !== sonIstek) {
     const kim = m.karakterler.find((k) => k.id === i.kim);
-    bildir(i.tur === 'hareket' ? `${kim?.ad || '?'} yürümek istiyor.` : `${kim?.ad || '?'} → ${i.hedef_ad}: saldırı isteği.`, 'ok');
+    const ad = kim?.ad || '?';
+    const metin =
+      i.tur === 'hareket'
+        ? `${ad} yürümek istiyor.`
+        : i.tur === 'buyu'
+          ? i.hedef === i.kim
+            ? `${ad} kendine büyü yapmak istiyor (${i.buyu}).`
+            : `${ad} → ${i.hedef_ad}: büyü isteği (${i.buyu}).`
+          : `${ad} → ${i.hedef_ad}: saldırı isteği.`;
+    bildir(metin, 'ok');
     if (dar.matches && !$('#uygulama').classList.contains('show-yan')) rozet(okunmamis + 1);
   }
   sonIstek = i?.id ?? null;
@@ -373,17 +430,19 @@ function mesaj(m) {
       harita.ayarla(m);
       const sonuc = tur.ayarla(m);
       if (sonuc.yeniSira && sonuc.siraBende && !ilk) {
-        bildir('Sıra sende! Yürümek için haritaya, saldırmak için bir karaktere tıkla.', 'ok');
+        bildir('Sıra sende! Yürümek için haritaya, saldırmak ya da büyü yapmak için bir karaktere tıkla.', 'ok');
         if (dar.matches && !$('#uygulama').classList.contains('show-yan')) rozet(Math.max(okunmamis, 1));
       }
       siraBende = sonuc.siraBende;
       $('#ac-yan').classList.toggle('btn-primary', siraBende || Boolean(m.ben.gm && m.istek));
       if (!m.ben.gm) {
         durumKartiCiz($('#durum-karti'), m);
-        envanterCiz($('#envanter-liste'), m.envanter);
-        $('#envanter-sayi').textContent = m.envanter.length ? `(${m.envanter.length})` : '';
+        envanterCiz($('#envanter-liste'), m.envanter, { azami: m.envanter_azami, birak: m.ben.yerde && !m.olu ? (sira, e) => gonder({ t: 'esya_yere', sira, ad: e.ad }) : null });
+        $('#envanter-sayi').textContent = `(${m.envanter.length}/${m.envanter_azami})`;
       }
       gm?.ayarla(m);
+      if (gorunumAcik?.kapandi()) gorunumAcik = null;
+      gorunumAcik?.yenile();
       baslikGuncelle();
       bosDurum();
       kimlerCiz();

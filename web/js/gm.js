@@ -1,10 +1,11 @@
 import { $, h, throttle, debounce, bildir, dosyaYukle, dosyaAdi, sayiYaz, adKisalt, yolKodla } from './ortak.js';
-import { onay, formAc } from './pencere.js';
-import { esyaKarti, grupla } from './envanter.js';
+import { onay, formAc, goster } from './pencere.js';
+import { esyaKarti, esyaOnizle, grupla, agirlikYaz } from './envanter.js';
 import { STATLAR } from './tur.js';
 
 const NPC_RENKLERI = ['#a8402f', '#4f5a63', '#7a5b3c', '#2f6b4f', '#6b3f7a', '#8a6a2f', '#6fa8dc', '#e3798b', '#8cc084', '#d9d2c3'];
 const GORSEL = /\.(png|jpe?g|gif|webp)$/i;
+const SURUKLEME_PAYI = 6; // bu kadar pikselden az kayan basış tıklamadır
 
 function depoOku(ad, varsayilan) {
   try {
@@ -22,12 +23,81 @@ function depoYaz(ad, deger) {
   }
 }
 
-/** GM paneli: harita, görüş, ızgara, tur sırası, karakterler (statlar, envanter), eşyalar, ayarlar ve istekler. */
-export function gmPaneliOlustur({ gonder, harita }) {
+/** GM paneli: harita, görüş, ızgara, tur sırası, karakterler (yerleştirme, statlar, envanter, görünüm), eşyalar,
+ * ayarlar ve istekler. Karakterler ve eşyalar listeden haritaya sürüklenip bırakılır. */
+export function gmPaneliOlustur({ gonder, harita, gorunumAc }) {
   let durum = null;
   let secili = null;
   let bekleyenNpc = null;
   const karakter = (id) => durum?.karakterler.find((k) => k.id === id) || null;
+
+  // ------------------------------------------------------------ listeden haritaya sürükle-bırak
+
+  const masa = $('#masa');
+  const haritaUstunde = (e) => Boolean(document.elementFromPoint(e.clientX, e.clientY)?.closest('#gorus'));
+
+  /* Haritaya bırakılan: karakter yerleşir (ya da oraya yürür); eşya oradaki karaktere gider ya da yere konur */
+  function birak(veri, cx, cy) {
+    const yer = harita.kareKonumu(cx, cy);
+    if (!yer || !durum.harita) return bildir('Önce bir harita aç.');
+    if (veri.tur === 'karakter') gonder({ t: 'yerlestir', id: veri.id, x: yer.x, y: yer.y });
+    else if (veri.tur === 'katalog') gonder({ t: 'esya_birak', kaynak: 'katalog', esya: veri.esya, x: yer.x, y: yer.y });
+    else if (veri.tur === 'envanter') gonder({ t: 'esya_birak', kaynak: 'envanter', karakter: veri.karakter, sira: veri.sira, ad: veri.ad, x: yer.x, y: yer.y });
+  }
+
+  /* Öğeyi haritaya sürüklenebilir yapar (fare, kalem ve dokunma; HTML5 sürükle-bırak düğmelerde her tarayıcıda çalışmaz).
+     Sürükleme öğenin kendi üstünde biterse arkasından gelen tıklama yutulur. */
+  function suruklenebilir(el, veri, etiket) {
+    let yut = false;
+    el.classList.add('is-draggable');
+    el.addEventListener(
+      'click',
+      (e) => {
+        if (!yut) return;
+        yut = false;
+        e.stopImmediatePropagation();
+        e.preventDefault();
+      },
+      true,
+    );
+    el.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || !durum?.harita) return;
+      e.preventDefault(); /* sürüklerken yazı seçilmesin */
+      const bas = { x: e.clientX, y: e.clientY };
+      let hayalet = null;
+      const hareket = (ev) => {
+        if (!hayalet) {
+          if (Math.hypot(ev.clientX - bas.x, ev.clientY - bas.y) < SURUKLEME_PAYI) return;
+          hayalet = h('div', { class: 'drag-ghost', text: etiket });
+          document.body.append(hayalet);
+          el.classList.add('is-dragging');
+        }
+        hayalet.style.transform = `translate(${ev.clientX + 12}px, ${ev.clientY + 10}px)`;
+        masa.classList.toggle('is-drop', haritaUstunde(ev));
+      };
+      const bitir = (ev) => {
+        window.removeEventListener('pointermove', hareket);
+        window.removeEventListener('pointerup', bitir);
+        window.removeEventListener('pointercancel', bitir);
+        if (!hayalet) return;
+        hayalet.remove();
+        el.classList.remove('is-dragging');
+        masa.classList.remove('is-drop');
+        if (ev.type === 'pointerup' && el.contains(document.elementFromPoint(ev.clientX, ev.clientY))) {
+          /* tıklama aynı görevde gelir; gelmezse bayrak sonrakini yutmasın */
+          yut = true;
+          setTimeout(() => {
+            yut = false;
+          });
+        }
+        if (ev.type === 'pointerup' && haritaUstunde(ev)) birak(veri, ev.clientX, ev.clientY);
+      };
+      window.addEventListener('pointermove', hareket);
+      window.addEventListener('pointerup', bitir);
+      window.addEventListener('pointercancel', bitir);
+    });
+    return el;
+  }
 
   // ------------------------------------------------------------ harita
 
@@ -154,7 +224,6 @@ export function gmPaneliOlustur({ gonder, harita }) {
   });
 
   // Haritanın üstüne bırakılan görseller haritalar klasörüne yüklenir
-  const masa = $('#masa');
   const ipucu = $('#birak');
   let derinlik = 0;
   const dosyaVar = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
@@ -273,31 +342,48 @@ export function gmPaneliOlustur({ gonder, harita }) {
       kap.replaceChildren(h('li', { class: 'hint', text: 'Henüz karakter yok.' }));
     } else {
       kap.replaceChildren(
-        ...liste.map((k) =>
-          h(
+        ...liste.map((k) => {
+          const yerlesmemis = durum.harita && !k.yerde;
+          return h(
             'li',
             {},
-            h(
-              'button',
-              {
-                class: `char-row${secili === k.id ? ' is-selected' : ''}${k.olu ? ' is-dead' : ''}`,
-                type: 'button',
-                vars: { '--c': k.renk },
-                onclick: () => {
-                  sec(k.id);
-                  if (durum.harita) harita.odakla(k.id);
+            suruklenebilir(
+              h(
+                'button',
+                {
+                  class: `char-row${secili === k.id ? ' is-selected' : ''}${k.olu ? ' is-dead' : ''}${yerlesmemis ? ' is-unplaced' : ''}`,
+                  type: 'button',
+                  vars: { '--c': k.renk },
+                  title: durum.harita ? `${k.ad}: haritaya sürükleyip bırakarak ${k.yerde ? 'taşı' : 'yerleştir'}` : k.ad,
+                  onclick: () => {
+                    sec(k.id);
+                    if (durum.harita && k.yerde) harita.odakla(k.id);
+                  },
                 },
-              },
-              h('span', { class: `dot${k.npc ? ' is-npc' : ''}` }),
-              h('span', { class: 'row-name', text: k.ad }),
-              k.gizli ? h('span', { class: 'row-meta', text: 'gizli' }) : null,
-              k.olu ? h('span', { class: 'row-meta is-dead', text: 'ölü' }) : !k.npc && !k.cevrimici ? h('span', { class: 'row-meta', text: 'bağlı değil' }) : null,
-              h('span', { class: 'mini-stats', text: `${sayiYaz(k.statlar.can)} can · ${sayiYaz(k.statlar.enerji)} en.` }),
+                h('span', { class: `dot${k.npc ? ' is-npc' : ''}` }),
+                h('span', { class: 'row-name', text: k.ad }),
+                k.gizli ? h('span', { class: 'row-meta', text: 'gizli' }) : null,
+                k.olu
+                  ? h('span', { class: 'row-meta is-dead', text: 'ölü' })
+                  : yerlesmemis
+                    ? h('span', { class: 'row-meta is-unplaced', text: 'haritada değil' })
+                    : !k.npc && !k.cevrimici
+                      ? h('span', { class: 'row-meta', text: 'bağlı değil' })
+                      : null,
+                h('span', { class: 'mini-stats', text: `${sayiYaz(k.statlar.can)} can · ${sayiYaz(k.statlar.enerji)} en.` }),
+              ),
+              { tur: 'karakter', id: k.id },
+              k.ad,
             ),
-          ),
-        ),
+          );
+        }),
       );
     }
+    const bekleyen = durum.harita ? liste.filter((k) => !k.yerde).length : 0;
+    $('#yerlestir-ipucu').hidden = !bekleyen;
+    $('#yerlestir-ipucu').textContent = bekleyen
+      ? `${bekleyen} karakter haritada değil. Onları listeden haritaya sürükleyip bırakarak yerleştir; yerleşmeyen oyuncunun sırası geçilir.`
+      : '';
     $('#npc-ekle').disabled = !durum.harita;
     editorCiz();
     katalogCiz();
@@ -353,14 +439,20 @@ export function gmPaneliOlustur({ gonder, harita }) {
     for (const [ad, girdi] of Object.entries(statGirdileri)) {
       if (document.activeElement !== girdi) girdi.value = String(Math.round(k.statlar[ad] * 100) / 100);
     }
+    $('#kd-agirlik').textContent = sayiYaz(k.statlar.agirlik);
     const islem = [];
     islem.push(
       k.olu
         ? h('button', { class: 'btn btn-sm', type: 'button', onclick: () => gonder({ t: 'dirilt', id: k.id }), text: 'Dirilt' })
         : h('button', { class: 'btn btn-sm btn-danger', type: 'button', onclick: () => gonder({ t: 'oldur', id: k.id }), text: 'Öldür' }),
     );
-    if (durum.harita && !k.olu && durum.sira.aktif && durum.sira.sirada === k.id) {
+    islem.push(h('button', { class: 'btn btn-sm', type: 'button', onclick: () => gorunumAc(k.id), text: 'Görünüm…' }));
+    if (durum.harita && k.yerde && !k.olu && durum.sira.aktif && durum.sira.sirada === k.id) {
       islem.push(h('button', { class: 'btn btn-sm', type: 'button', onclick: () => saldirt(k), text: 'Saldırt…' }));
+      if (durum.buyuler.length) islem.push(h('button', { class: 'btn btn-sm', type: 'button', onclick: () => buyuYaptir(k), text: 'Büyü yaptır…' }));
+    }
+    if (!k.npc && durum.harita && k.yerde) {
+      islem.push(h('button', { class: 'btn btn-sm btn-ghost', type: 'button', onclick: () => gonder({ t: 'haritadan_kaldir', id: k.id }), text: 'Haritadan kaldır' }));
     }
     if (k.npc) {
       islem.push(
@@ -383,27 +475,26 @@ export function gmPaneliOlustur({ gonder, harita }) {
 
     const env = $('#kd-envanter');
     const gruplar = grupla(k.envanter);
-    $('#kd-env-sayi').textContent = k.envanter.length ? `${k.envanter.length} eşya` : '';
-    if (!gruplar.length) {
-      env.replaceChildren(h('li', { class: 'hint', text: 'Envanter boş. Aşağıdaki eşyalardan birine tıklayınca bu karaktere verilir.' }));
-    } else {
-      env.replaceChildren(
-        ...gruplar.map((g) => {
-          const e = g.esya;
-          const sonSira = g.siralar[g.siralar.length - 1];
-          return h(
-            'li',
-            { class: 'inv-row' },
-            e.url && e.gorsel && e.var ? h('img', { class: 'inv-thumb', src: e.url, alt: '' }) : h('span', { class: 'inv-thumb' }),
-            h('span', { class: 'row-name', text: e.resim && !e.var ? `${e.ad} (resmi yok)` : e.ad }),
-            e.sinif ? h('span', { class: 'tag', text: e.sinif }) : null,
-            g.adet > 1 ? h('span', { class: 'inv-count', text: `×${g.adet}` }) : null,
-            h('button', { class: 'icon-btn', type: 'button', title: 'Adını ya da sınıfını değiştir', 'aria-label': `${e.ad} düzenle`, onclick: () => esyaDuzenle(k, sonSira, e), text: '✎' }),
-            h('button', { class: 'icon-btn', type: 'button', title: 'Bir tane al', 'aria-label': `${e.ad}: bir tane al`, onclick: () => gonder({ t: 'esya_al', karakter: k.id, sira: sonSira }), text: '−' }),
-          );
-        }),
-      );
-    }
+    $('#kd-env-sayi').textContent = `${k.envanter.length}/${durum.envanter_azami} eşya`;
+    env.replaceChildren(
+      ...gruplar.map((g) => {
+        const e = g.esya;
+        const sonSira = g.siralar[g.siralar.length - 1];
+        const satir = h(
+          'li',
+          { class: `inv-row${e.sabit ? ' is-fixed' : ''}`, title: e.sabit ? `${e.ad}: herkeste var, bırakılamaz` : `${e.ad}: haritaya sürükleyip bırakarak yere koy ya da başka birine ver` },
+          e.url && e.gorsel && e.var ? h('img', { class: 'inv-thumb', src: e.url, alt: '' }) : h('span', { class: `inv-thumb${e.sabit ? ' is-fist' : ''}`, text: e.sabit ? '✊' : '' }),
+          h('span', { class: 'row-name', text: e.resim && !e.var ? `${e.ad} (resmi yok)` : e.ad }),
+          e.sinif ? h('span', { class: 'tag', text: e.sinif }) : null,
+          h('span', { class: 'inv-weight', text: agirlikYaz(e) }),
+          g.adet > 1 ? h('span', { class: 'inv-count', text: `×${g.adet}` }) : null,
+          e.sabit ? null : h('button', { class: 'icon-btn', type: 'button', title: 'Adını, sınıfını ya da ağırlığını değiştir', 'aria-label': `${e.ad} düzenle`, onclick: () => esyaDuzenle(k, sonSira, e), text: '✎' }),
+          e.sabit ? null : h('button', { class: 'icon-btn', type: 'button', title: 'Bir tane al', 'aria-label': `${e.ad}: bir tane al`, onclick: () => gonder({ t: 'esya_al', karakter: k.id, sira: sonSira }), text: '−' }),
+        );
+        return e.sabit ? satir : suruklenebilir(satir, { tur: 'envanter', karakter: k.id, sira: sonSira, ad: e.ad }, e.ad);
+      }),
+    );
+    if (k.envanter.length <= 1) env.append(h('li', { class: 'hint', text: 'Aşağıdaki eşyalardan birine tıklayınca bu karaktere verilir; haritadaki pulunun üstüne sürükleyip bırakarak da verebilirsin.' }));
   }
 
   async function esyaDuzenle(k, sira, e) {
@@ -412,17 +503,40 @@ export function gmPaneliOlustur({ gonder, harita }) {
       alanlar: [
         { ad: 'ad', etiket: 'Ad', deger: e.ad, azami: 60 },
         { ad: 'sinif', etiket: 'Sınıf', deger: e.sinif, azami: 31, oneriler: durum.siniflar },
+        { ad: 'agirlik', etiket: 'Ağırlık', tur: 'sayi', deger: e.agirlik ?? 1, en: 0, ust: 1000000 },
       ],
       dugme: 'Kaydet',
     });
     if (!sonuc) return;
     if (!sonuc.ad.trim()) return bildir('Eşyanın adı boş olamaz.');
-    gonder({ t: 'esya_duzenle', karakter: k.id, sira, ad: sonuc.ad.trim(), sinif: sonuc.sinif.trim() });
+    const agirlik = Number(sonuc.agirlik);
+    gonder({ t: 'esya_duzenle', karakter: k.id, sira, ad: sonuc.ad.trim(), sinif: sonuc.sinif.trim(), ...(sonuc.agirlik !== '' && Number.isFinite(agirlik) ? { agirlik: Math.max(0, agirlik) } : {}) });
+  }
+
+  /* Haritada yerdeki bir eşyaya tıklandı */
+  async function yerEsyasiTiklandi(id) {
+    const y = harita.yerEsyasi(id);
+    if (!y) return;
+    const sonuc = await esyaOnizle(y.esya, 1, [{ metin: 'Haritadan kaldır', deger: 'sil', sinif: 'btn-danger' }]);
+    if (sonuc === 'sil') gonder({ t: 'yer_esya_sil', id });
+  }
+
+  async function buyuYaptir(a) {
+    const hedefler = durum.karakterler.filter((k) => k.yerde && !k.olu);
+    const sonuc = await formAc({
+      baslik: `${a.ad} büyü yapsın`,
+      metin: 'GM\'in yaptırdığı büyü onay beklemez; kurallar.c\'deki buyu() hemen çağrılır.',
+      alanlar: [
+        { ad: 'hedef', etiket: 'Hedef', tur: 'secim', deger: a.id, secenekler: hedefler.map((k) => ({ deger: k.id, metin: k.id === a.id ? `${k.ad} (kendine)` : k.npc ? `${k.ad} (NPC)` : k.ad })) },
+        { ad: 'buyu', etiket: 'Büyü', tur: 'secim', secenekler: durum.buyuler.map((b) => ({ deger: b, metin: b })) },
+      ],
+      dugme: 'Büyü yap',
+    });
+    if (sonuc) gonder({ t: 'gm_buyu', yapan: a.id, hedef: sonuc.hedef, buyu: sonuc.buyu });
   }
 
   async function saldirt(a) {
-    const hedefler = durum.karakterler.filter((k) => k.id !== a.id && !k.olu);
-    if (!a.envanter.length) return bildir(`${a.ad} için önce bir eşya ver; saldırı bir eşyayla yapılır.`);
+    const hedefler = durum.karakterler.filter((k) => k.id !== a.id && k.yerde && !k.olu);
     if (!hedefler.length) return bildir('Saldırılacak kimse yok.');
     const esyalar = grupla(a.envanter);
     const sonuc = await formAc({
@@ -445,7 +559,9 @@ export function gmPaneliOlustur({ gonder, harita }) {
   function katalogCiz() {
     const k = karakter(secili);
     const kap = $('#esyalar');
-    $('#esya-ipucu').textContent = k ? `Bir eşyaya tıklayınca ${k.ad} karakterine verilir.` : 'Önce bir karakter seç; sonra bir eşyaya tıklayınca ona verilir.';
+    $('#esya-ipucu').textContent = k
+      ? `Bir eşyaya tıklayınca ${k.ad} karakterine verilir. Haritaya sürükleyip bırakırsan bırakılan yerdeki karaktere gider ya da yere konur.`
+      : 'Bir eşyayı haritaya sürükleyip bırak: bir karakterin üstüne bırakırsan ona gider, boş yere bırakırsan yerde durur. Bir karakter seçiliyken eşyaya tıklarsan da ona verilir.';
     if (!durum.esyalar.length) {
       kap.replaceChildren(
         h('p', { class: 'hint', text: durum.siniflar.length ? `esyalar klasörü boş. "Eşya yükle" ile sınıflara (${durum.siniflar.join(', ')}) resim ekle.` : 'esyalar klasörü boş. Eşya yükle düğmesiyle resim ekle.' }),
@@ -470,12 +586,16 @@ export function gmPaneliOlustur({ gonder, harita }) {
                 h(
                   'li',
                   {},
-                  esyaKarti(
-                    { ad: e.ad, sinif: e.sinif, url: e.url, gorsel: e.gorsel, resim: `esyalar/${e.dosya}` },
-                    {
-                      baslik: k ? `${e.ad}: ${k.ad} karakterine ver` : e.ad,
-                      tikla: () => (k ? gonder({ t: 'esya_ver', karakter: k.id, esya: e.dosya }) : bildir('Önce bir karakter seç.')),
-                    },
+                  suruklenebilir(
+                    esyaKarti(
+                      { ad: e.ad, sinif: e.sinif, url: e.url, gorsel: e.gorsel, resim: `esyalar/${e.dosya}` },
+                      {
+                        baslik: k ? `${e.ad}: ${k.ad} karakterine ver (ya da haritaya sürükle)` : `${e.ad}: haritaya sürükleyip bırak`,
+                        tikla: () => (k ? gonder({ t: 'esya_ver', karakter: k.id, esya: e.dosya }) : bildir('Önce bir karakter seç ya da eşyayı haritaya sürükle.')),
+                      },
+                    ),
+                    { tur: 'katalog', esya: e.dosya },
+                    e.ad,
                   ),
                 ),
               ),
@@ -529,11 +649,18 @@ export function gmPaneliOlustur({ gonder, harita }) {
         h('p', { class: 'req-what' }, h('b', { text: ad }), ' yürümek istiyor'),
         h('p', { class: 'req-meta', text: `${mesafe}${ayar ? 'hedefi sen kaydırdın' : 'hedefi haritada sürükleyerek kaydırabilirsin'}` }),
       ];
+    } else if (ist.tur === 'buyu') {
+      govde = [
+        ist.hedef === ist.kim
+          ? h('p', { class: 'req-what' }, h('b', { text: ad }), ' kendine büyü yapmak istiyor')
+          : h('p', { class: 'req-what' }, h('b', { text: ad }), ' → ', h('b', { text: ist.hedef_ad }), ' büyü yapmak istiyor'),
+        h('p', { class: 'req-meta req-item' }, h('span', { class: 'spell-icon', 'aria-hidden': 'true', text: '✦' }), h('span', { text: ist.buyu })),
+      ];
     } else {
       const e = ist.esya || {};
       govde = [
         h('p', { class: 'req-what' }, h('b', { text: ad }), ' → ', h('b', { text: ist.hedef_ad }), ' saldırmak istiyor'),
-        h('p', { class: 'req-meta req-item' }, e.url && e.gorsel && e.var ? h('img', { src: e.url, alt: '' }) : null, h('span', { text: e.sinif ? `${e.ad} · ${e.sinif}` : e.ad || 'eşya' })),
+        h('p', { class: 'req-meta req-item' }, e.url && e.gorsel && e.var ? h('img', { src: e.url, alt: '' }) : e.sabit ? h('span', { class: 'spell-icon', 'aria-hidden': 'true', text: '✊' }) : null, h('span', { text: e.sinif ? `${e.ad} · ${e.sinif}` : e.ad || 'eşya' })),
       ];
     }
     const onayla = () => {
@@ -548,14 +675,14 @@ export function gmPaneliOlustur({ gonder, harita }) {
       h('h2', { class: 'requests-title', text: 'Bekleyen istek' }),
       h(
         'article',
-        { class: `request${ist.tur === 'saldiri' ? ' is-attack' : ''}`, vars: { '--c': kim?.renk || 'var(--bone)' } },
+        { class: `request${ist.tur === 'saldiri' ? ' is-attack' : ist.tur === 'buyu' ? ' is-spell' : ''}`, vars: { '--c': kim?.renk || 'var(--bone)' } },
         h('div', { class: 'req-body' }, ...govde),
         h(
           'div',
           { class: 'req-actions' },
           h('button', { class: 'btn btn-sm btn-ghost', type: 'button', onclick: () => harita.odakla(ist.kim), text: 'Göster' }),
           h('button', { class: 'btn btn-sm', type: 'button', onclick: reddet, text: 'Reddet' }),
-          h('button', { class: `btn btn-sm ${ist.tur === 'saldiri' ? 'btn-danger-solid' : 'btn-primary'}`, type: 'button', onclick: onayla, text: 'Onayla' }),
+          h('button', { class: `btn btn-sm ${ist.tur === 'hareket' ? 'btn-primary' : 'btn-danger-solid'}`, type: 'button', onclick: onayla, text: 'Onayla' }),
         ),
       ),
     );
@@ -576,9 +703,27 @@ export function gmPaneliOlustur({ gonder, harita }) {
       return;
     }
     const enerji = Number($('#ayar-enerji').value);
-    gonder({ t: 'ayarlar', oyun_adi: $('#ayar-ad').value, sifre, tur_enerjisi: Number.isFinite(enerji) ? Math.max(0, enerji) : 10 });
+    const gorus = Number($('#ayar-gorus').value);
+    gonder({
+      t: 'ayarlar',
+      oyun_adi: $('#ayar-ad').value,
+      sifre,
+      tur_enerjisi: Number.isFinite(enerji) ? Math.max(0, enerji) : 10,
+      ...($('#ayar-gorus').value !== '' && Number.isFinite(gorus) ? { gorus: Math.max(0, gorus) } : {}),
+    });
     formDegisti = false;
     bildir('Ayarlar kaydedildi.', 'ok');
+  });
+
+  $('#mac-sifirla').addEventListener('click', async () => {
+    const evet = await onay({
+      baslik: 'Maç sıfırlansın mı?',
+      metin:
+        'NPC\'ler, oyuncuların statları, envanterleri (yumruk kalır), haritalardaki yerleri, keşifleri, yerdeki eşyalar, tur sırası ve kayıt silinir. Oyuncular, ayarlar, haritalar ve eşya resimleri kalır. Önceki hali oyun klasöründe durum-sifirlamadan-once.json olarak saklanır.',
+      dugme: 'Maçı sıfırla',
+      tehlikeli: true,
+    });
+    if (evet) gonder({ t: 'mac_sifirla' });
   });
 
   function ayarlarCiz() {
@@ -587,6 +732,7 @@ export function gmPaneliOlustur({ gonder, harita }) {
       $('#ayar-ad').value = a.oyun_adi;
       $('#ayar-sifre').value = a.sifre;
       $('#ayar-enerji').value = String(a.tur_enerjisi);
+      $('#ayar-gorus').value = String(a.gorus);
     }
     const oyuncular = durum.karakterler.filter((k) => !k.npc);
     $('#oyuncu-yonetim').replaceChildren(
@@ -653,5 +799,6 @@ export function gmPaneliOlustur({ gonder, harita }) {
     istekTasindi() {
       if (durum) istekCiz();
     },
+    yerEsyasiTiklandi,
   };
 }

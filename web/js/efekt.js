@@ -33,6 +33,13 @@ function mermi(ctx, resim, s) {
   return el;
 }
 
+/* Büyü küresi: hedefe uçan parlak top */
+function kure(ctx, s) {
+  const el = h('div', { class: 'missile is-orb', vars: { '--ms': `${Math.round(s * 0.5)}px` } });
+  ctx.katman.append(el);
+  return el;
+}
+
 function kivilcimlar(ctx, x, y, s, renk) {
   const n = 7;
   for (let i = 0; i < n; i++) {
@@ -84,13 +91,16 @@ function yuzenSayi(ctx, x, y, s, hasar) {
 
 /**
  * Saldırı: saldıran hedefe doğru atılır, eşyası (resmi) hedefe uçar ya da yakındaysa savrulur;
- * isabette hedef sarsılır ve kızarır, ıskada yana kaçar. Hasar sayısını yalnızca GM ve hedefin kendisi görür
- * (sunucu yalnızca onlara gönderir).
+ * isabette hedef sarsılır ve kızarır, ıskada yana kaçar. Büyüde (m.buyu) hedefe bir küre uçar; can artırdıysa hedef
+ * yeşil parlar, kendine yapılan büyüde yalnızca bir halka açılır. Hasar sayısını yalnızca GM ve hedefin kendisi
+ * görür (sunucu yalnızca onlara gönderir).
  */
 export function saldiriOynat(ctx, m) {
   const s = ctx.boyut();
   const az = azHareket();
-  const A = m.a ? ctx.px(m.a.x, m.a.y) : null;
+  const buyu = Boolean(m.buyu);
+  const kendine = m.saldiran === m.hedef;
+  const A = m.a && !kendine ? ctx.px(m.a.x, m.a.y) : null;
   const H = m.h ? ctx.px(m.h.x, m.h.y) : null;
   const aGovde = A ? ctx.govde(m.saldiran) : null;
   const hGovde = H ? ctx.govde(m.hedef) : null;
@@ -112,7 +122,28 @@ export function saldiriOynat(ctx, m) {
     carpma = 190;
   }
 
-  if (A && H && !az) {
+  if (kendine && H && !az) {
+    halka(ctx, H.x, H.y, s * 1.2, 'is-magic');
+    carpma = 260;
+  }
+
+  if (A && H && !az && buyu) {
+    const mesafe = Math.hypot(H.x - A.x, H.y - A.y) / s;
+    const el = kure(ctx, s);
+    const yari = s * 0.25;
+    const sure = Math.min(620, 220 + mesafe * 52);
+    const anim = el.animate(
+      [
+        { transform: `translate(${A.x - yari}px, ${A.y - yari}px) scale(.3)`, opacity: 0 },
+        { transform: `translate(${A.x + (H.x - A.x) * 0.12 - yari}px, ${A.y + (H.y - A.y) * 0.12 - yari}px) scale(1)`, opacity: 1, offset: 0.18 },
+        { transform: `translate(${H.x - yari}px, ${H.y - yari}px) scale(1.25)`, opacity: 1 },
+      ],
+      { duration: sure, delay: 120, easing: 'cubic-bezier(.4,.1,.6,1)', fill: 'both' },
+    );
+    anim.onfinish = () => el.remove();
+    anim.oncancel = () => el.remove();
+    carpma = 120 + sure;
+  } else if (A && H && !az) {
     const mesafe = Math.hypot(H.x - A.x, H.y - A.y) / s;
     const aci = (Math.atan2(H.y - A.y, H.x - A.x) * 180) / Math.PI;
     const el = mermi(ctx, m.resim, s);
@@ -152,7 +183,21 @@ export function saldiriOynat(ctx, m) {
 
   if (H) {
     setTimeout(() => {
-      if (hGovde && m.isabet) {
+      const iyilesme = typeof m.hasar === 'number' && m.hasar < 0;
+      if (hGovde && m.isabet && iyilesme) {
+        hGovde.animate(
+          [
+            { transform: 'scale(1)', filter: 'none' },
+            { transform: 'scale(1.1)', filter: 'brightness(1.5) saturate(1.4) hue-rotate(60deg)', offset: 0.3 },
+            { transform: 'scale(1)', filter: 'none' },
+          ],
+          { duration: az ? 1 : 620, easing: 'ease-out' },
+        );
+        if (!az) {
+          halka(ctx, H.x, H.y, s, 'is-heal');
+          kivilcimlar(ctx, H.x, H.y, s, '#8fe0a0');
+        }
+      } else if (hGovde && m.isabet) {
         hGovde.animate(
           [
             { transform: 'translate(0,0)', filter: 'none' },
@@ -165,9 +210,12 @@ export function saldiriOynat(ctx, m) {
           { duration: az ? 1 : 460, easing: 'ease-out' },
         );
         if (!az) {
-          halka(ctx, H.x, H.y, s, 'is-hit');
-          kivilcimlar(ctx, H.x, H.y, s, 'var(--ember-hi)');
+          halka(ctx, H.x, H.y, s, buyu ? 'is-magic' : 'is-hit');
+          kivilcimlar(ctx, H.x, H.y, s, buyu ? '#c9a3ff' : 'var(--ember-hi)');
         }
+      } else if (buyu) {
+        /* Canı değiştirmeyen büyü: hedefin çevresinde bir halka (kendine yapılanınki zaten açıldı) */
+        if (!az && !kendine) halka(ctx, H.x, H.y, s * 0.9, 'is-magic');
       } else if (hGovde && !az) {
         const dx = A ? H.x - A.x : 1;
         const dy = A ? H.y - A.y : 0;

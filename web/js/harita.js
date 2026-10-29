@@ -13,13 +13,14 @@ const yumusak = (p) => (p < 0.5 ? 2 * p * p : 1 - (-2 * p + 2) ** 2 / 2);
 /**
  * Harita görünümü. Konumlar kare birimindedir: (0,0) haritanın sol üst köşesi, (0.5, 0.5) ilk karenin ortası.
  * Harita, GM'in seçtiği genişlik × yükseklik kadar kareye bölünür; resim bu alana gerilir.
- * Oyuncu (yalnızca kendi sırasında): bir yere tıklayınca yürüme isteği, bir karaktere tıklayınca saldırı seçimi
- * açılır; ikisi de GM'e gider.
- * GM: her tokenı sürükleyebilir, bekleyen yürüme isteğinin hedefini sürükleyerek düzeltebilir.
+ * Oyuncu (yalnızca kendi sırasında): bir yere tıklayınca yürüme isteği, bir karaktere (ya da kendine) tıklayınca
+ * saldırı / büyü seçimi açılır; ikisi de GM'e gider.
+ * GM: her tokenı ve yerdeki eşyaları sürükleyebilir, bekleyen yürüme isteğinin hedefini sürükleyerek düzeltebilir.
+ * Pulun boyu karakterin yüküyle büyür; resmi ve şapkası varsa üstünde görünür.
  * Sağ tık (dokunmatikte uzun basma) herkese işaret gösterir.
  */
 export function haritaOlustur(el) {
-  const { gorus, dunya, resim, izgara, tokenKatmani, sisTuvali, katman, etiketler, efektKatmani, isaretKatmani, yakinlik } = el;
+  const { gorus, dunya, resim, izgara, yerKatmani, tokenKatmani, sisTuvali, katman, etiketler, efektKatmani, isaretKatmani, yakinlik } = el;
   const gor = { olcek: 1, tx: 0, ty: 0 };
   let durum = null;
   let harita = null; // görünür harita (gizliyse null)
@@ -33,7 +34,9 @@ export function haritaOlustur(el) {
   const istekAyar = new Map(); // GM: istek kimliği → düzeltilmiş hedef
   let halkalar = true;
   let bekleyenKesif = []; // kendi yürüyüşüm sürerken gelen keşif parçaları
-  const dinleyici = { yuru() {}, tasi() {}, sec() {}, isaret() {}, saldir() {}, istekTasi() {} };
+  const dinleyici = { yuru() {}, tasi() {}, sec() {}, isaret() {}, etkiles() {}, istekTasi() {}, esyaTasi() {}, esyaTikla() {} };
+  const yerdekiler = new Map(); // yerdeki eşyalar: id → { veri, el }
+  const sonSaldiri = new Map(); // id → saldırı animasyonunun bittiği an (ölüm ondan sonra oynasın)
   const sis = sisOlustur(sisTuvali);
 
   const ben = () => durum?.ben;
@@ -106,6 +109,7 @@ export function haritaOlustur(el) {
       yakinlik.hidden = true;
       resim.removeAttribute('src');
       tokenleriKur([]);
+      yerdekileriKur([]);
       sis.ayarla({ acik: false });
       onizleme = null;
       katmanCiz();
@@ -136,6 +140,7 @@ export function haritaOlustur(el) {
       istekAyar.clear();
     }
     tokenleriKur(yeni.tokenler || []);
+    yerdekileriKur(yeni.yerdekiler || []);
     sisAyarla(yeni);
     for (const id of istekAyar.keys()) if (yeni.istek?.id !== id) istekAyar.delete(id);
     if (!hareketEdebilir()) onizleme = null;
@@ -179,10 +184,12 @@ export function haritaOlustur(el) {
     sisGorusu();
   }
 
+  const menzil = () => durum?.gorus ?? 0;
+
   function sisGorusu() {
     if (!sis.etkin) return;
     const t = benimTokenim();
-    if (t) sis.gorus(t.goster.x, t.goster.y, durum.statlar?.gorus ?? 0);
+    sis.gorus(t ? t.goster.x : 0, t ? t.goster.y : 0, t ? menzil() : 0);
   }
 
   // ------------------------------------------------------------ tokenler
@@ -190,14 +197,20 @@ export function haritaOlustur(el) {
   const benimTokenim = () => (!gm() && ben()?.id ? tokenler.get(ben().id) : null);
 
   function yeniToken(veri) {
-    const disk = h('div', { class: 'token-disc' });
-    const govde = h('div', { class: 'token-body' }, disk);
+    const harfler = h('span', { class: 'token-initials' });
+    const foto = h('img', { class: 'token-img', alt: '', draggable: 'false', hidden: true });
+    const sapka = h('img', { class: 'token-hat', alt: '', draggable: 'false', hidden: true });
+    const disk = h('div', { class: 'token-disc' }, harfler, foto);
+    const govde = h('div', { class: 'token-body' }, disk, sapka);
     const isim = h('span', { class: 'token-name' });
     const t = {
       veri,
       el: h('div', { class: 'token', dataset: { id: veri.id } }, govde, isim),
       govde,
       disk,
+      harfler,
+      foto,
+      sapka,
       isim,
       goster: { x: veri.x, y: veri.y },
       anim: null,
@@ -257,9 +270,12 @@ export function haritaOlustur(el) {
     }
   }
 
+  const olcek = (veri) => (Number.isFinite(veri?.olcek) ? sinirla(veri.olcek, 0.5, 2) : 1);
+
   function konumla(t) {
     const p = px(t.goster.x, t.goster.y);
-    t.el.style.transform = `translate(${p.x - kare / 2}px, ${p.y - kare / 2}px)`;
+    const b = kare * olcek(t.veri);
+    t.el.style.transform = `translate(${p.x - b / 2}px, ${p.y - b / 2}px)`;
   }
 
   function siradakiId() {
@@ -269,13 +285,23 @@ export function haritaOlustur(el) {
     return s.sirada_ben ? ben().id : s.sirada?.id || null;
   }
 
+  /* Değişmediyse yeniden yüklemesin */
+  function resimAyarla(img, url) {
+    img.hidden = !url;
+    if (!url) img.removeAttribute('src');
+    else if (img.getAttribute('src') !== url) img.src = url;
+  }
+
   function tokenCiz(t) {
     const { veri, el } = t;
-    el.style.setProperty('--ts', `${kare}px`);
+    el.style.setProperty('--ts', `${kare * olcek(veri)}px`);
     el.style.setProperty('--tc', veri.renk);
     el.style.setProperty('--ti', yaziRengi(veri.renk));
     konumla(t);
-    t.disk.textContent = basHarfler(veri.ad);
+    t.harfler.textContent = basHarfler(veri.ad);
+    resimAyarla(t.foto, veri.resim || null);
+    resimAyarla(t.sapka, veri.sapka || null);
+    el.classList.toggle('has-img', Boolean(veri.resim));
     t.isim.textContent = veri.gizli ? `${veri.ad} (gizli)` : veri.ad;
     const anilar = veri.canli === false;
     el.classList.toggle('is-npc', Boolean(veri.npc));
@@ -308,6 +334,45 @@ export function haritaOlustur(el) {
     merkezle(p.x, p.y);
   }
 
+  // ------------------------------------------------------------ yerdeki eşyalar
+
+  function yerEsyasiCiz(y) {
+    const e = y.veri.esya;
+    const b = kare * 0.62;
+    y.el.style.setProperty('--gs', `${b}px`);
+    const p = px(y.goster.x, y.goster.y);
+    y.el.style.transform = `translate(${p.x - b / 2}px, ${p.y - b / 2}px)`;
+    y.el.title = e.sinif ? `${e.ad} (${e.sinif})` : e.ad;
+    y.el.classList.toggle('is-movable', gm());
+    const url = e.url && e.gorsel && e.var !== false ? e.url : null;
+    resimAyarla(y.img, url);
+    y.yazi.hidden = Boolean(url);
+    y.yazi.textContent = basHarfler(e.ad);
+  }
+
+  function yerdekileriKur(liste) {
+    const gorulen = new Set();
+    for (const veri of liste) {
+      gorulen.add(veri.id);
+      let y = yerdekiler.get(veri.id);
+      if (!y) {
+        const img = h('img', { alt: '', draggable: 'false', hidden: true });
+        const yazi = h('span', { class: 'ground-text' });
+        y = { veri, img, yazi, el: h('div', { class: 'ground-item', dataset: { yer: String(veri.id) } }, img, yazi) };
+        yerdekiler.set(veri.id, y);
+        yerKatmani.append(y.el);
+      }
+      y.veri = veri;
+      if (yerSurukle?.id !== veri.id) y.goster = { x: veri.x, y: veri.y };
+      yerEsyasiCiz(y);
+    }
+    for (const [id, y] of [...yerdekiler]) {
+      if (gorulen.has(id)) continue;
+      y.el.remove();
+      yerdekiler.delete(id);
+    }
+  }
+
   // ------------------------------------------------------------ yürüme animasyonu
 
   const animler = new Set();
@@ -333,9 +398,9 @@ export function haritaOlustur(el) {
       if (a.gir) t.el.style.opacity = String(Math.min(1, p * 5));
       if (a.cik && p > 0.8) t.el.style.opacity = String(Math.max(0, (1 - p) * 5));
       if (t === benimTokenim() && sis.etkin) {
-        sis.yol(once.x, once.y, t.goster.x, t.goster.y, durum.statlar?.gorus ?? 0);
+        sis.yol(once.x, once.y, t.goster.x, t.goster.y, menzil());
         sisGorusu();
-        bekleyenleriGoster(t.goster, durum.statlar?.gorus ?? 0);
+        bekleyenleriGoster(t.goster, menzil());
       }
       if (p >= 1) animBitir(t, true);
     }
@@ -386,7 +451,7 @@ export function haritaOlustur(el) {
     let t = tokenler.get(m.id);
     if (!t) {
       if (!m.gir && !gm()) return;
-      t = yeniToken({ id: m.id, ad: m.ad, renk: m.renk, npc: m.npc, olu: m.olu, canli: true, x: m.x1, y: m.y1 });
+      t = yeniToken({ id: m.id, ad: m.ad, renk: m.renk, npc: m.npc, olu: m.olu, canli: true, x: m.x1, y: m.y1, resim: m.resim, sapka: m.sapka, olcek: m.olcek });
       tokenCiz(t);
     }
     if (t.birakildi && Math.hypot(t.birakildi.x - m.x2, t.birakildi.y - m.y2) < 0.02) {
@@ -425,13 +490,25 @@ export function haritaOlustur(el) {
   function saldiriOlayi(m) {
     if (!harita) return;
     saldiriOynat(efektBaglami, m);
+    /* Saldırı ya da büyüyle hemen ölen hedef, vuruş animasyonu bitince devrilsin */
+    if (!azHareket()) sonSaldiri.set(m.hedef, performance.now() + 1150);
   }
 
   function olumOlayi(m) {
     const t = tokenler.get(m.id);
     if (!t || t.oluyor) return;
     t.oluyor = true;
-    olumOynat(efektBaglami, m.id, () => {
+    const bekle = (sonSaldiri.get(m.id) ?? 0) - performance.now();
+    sonSaldiri.delete(m.id);
+    if (bekle > 0) {
+      setTimeout(() => devril(t, m.id), bekle);
+      return;
+    }
+    devril(t, m.id);
+  }
+
+  function devril(t, id) {
+    olumOynat(efektBaglami, id, () => {
       t.oluyor = false;
       if (t.kaldir) {
         tokenSil(t);
@@ -497,9 +574,17 @@ export function haritaOlustur(el) {
       const hedefT = tokenler.get(ist.hedef);
       if (!hedefT) return;
       const b = px(hedefT.goster.x, hedefT.goster.y);
-      cizgi(g, a, b, gm() ? 'attack-line' : 'attack-line is-pending');
-      const yazi = gm() ? ist.esya?.ad || 'saldırı' : 'GM onayı bekleniyor';
-      etiket((a.x + b.x) / 2, (a.y + b.y) / 2, yazi, 'is-attack', ist.esya?.gorsel && ist.esya?.var ? ist.esya.url : null);
+      const buyu = ist.tur === 'buyu';
+      const sinif = buyu ? 'spell-line' : 'attack-line';
+      const yazi = gm() ? (buyu ? `✦ ${ist.buyu}` : ist.esya?.ad || 'saldırı') : 'GM onayı bekleniyor';
+      if (hedefT === kim) {
+        /* Kendine büyü: pulun çevresinde bir halka, etiket (şapkanın da) üstünde */
+        g.append(svg('circle', { cx: a.x, cy: a.y, r: kare * olcek(kim.veri) * 0.62, class: `${sinif}${gm() ? '' : ' is-pending'}` }));
+        etiket(a.x, a.y - kare * olcek(kim.veri) * 0.95, yazi, 'is-spell is-above');
+        return;
+      }
+      cizgi(g, a, b, gm() ? sinif : `${sinif} is-pending`);
+      etiket((a.x + b.x) / 2, (a.y + b.y) / 2, yazi, buyu ? 'is-spell' : 'is-attack', !buyu && ist.esya?.gorsel && ist.esya?.var ? ist.esya.url : null);
     }
   }
 
@@ -513,7 +598,7 @@ export function haritaOlustur(el) {
       for (const t of tokenler.values()) {
         if (t.veri.npc || !t.veri.statlar) continue;
         const p = px(t.goster.x, t.goster.y);
-        const halka = svg('circle', { cx: p.x, cy: p.y, r: Math.max(0, t.veri.statlar.gorus * kare), class: 'vision-ring' });
+        const halka = svg('circle', { cx: p.x, cy: p.y, r: Math.max(0, menzil() * kare), class: 'vision-ring' });
         halka.style.setProperty('--rc', t.veri.renk);
         g.append(halka);
       }
@@ -562,9 +647,10 @@ export function haritaOlustur(el) {
   // ------------------------------------------------------------ fare ve dokunma
 
   const parmaklar = new Map();
-  let kip = null; // 'kaydir' | 'surukle' | 'hayalet' | 'kistir'
+  let kip = null; // 'kaydir' | 'surukle' | 'yer' | 'hayalet' | 'kistir'
   let kaydir = null;
   let surukle = null;
+  let yerSurukle = null; // GM yerdeki bir eşyayı sürüklüyor
   let hayalet = null;
   let kistir = null;
   let bas = null;
@@ -592,10 +678,17 @@ export function haritaOlustur(el) {
 
     const ghost = e.button === 0 && gm() ? e.target.closest?.('[data-istek]') : null;
     const t = e.button === 0 ? canliToken(e.target) : null;
+    const yerEl = e.button === 0 && gm() && !t ? e.target.closest?.('.ground-item') : null;
     bas = { x: e.clientX, y: e.clientY, id: t ? t.veri.id : null, kaydi: false };
     if (ghost) {
       kip = 'hayalet';
       hayalet = { id: Number(ghost.dataset.istek) };
+    } else if (yerEl && yerdekiler.has(Number(yerEl.dataset.yer))) {
+      const y = yerdekiler.get(Number(yerEl.dataset.yer));
+      const p = dunyaya(e.clientX, e.clientY);
+      const kp = px(y.goster.x, y.goster.y);
+      yerSurukle = { id: y.veri.id, dx: p.x - kp.x, dy: p.y - kp.y };
+      kip = 'yer';
     } else if (gm() && t) {
       sec(t.veri.id);
       const p = dunyaya(e.clientX, e.clientY);
@@ -615,6 +708,7 @@ export function haritaOlustur(el) {
           bas = null;
           kip = null;
           surukle = null;
+          yerSurukle = null;
           hayalet = null;
         }
       }, UZUN_BASMA_MS);
@@ -622,11 +716,10 @@ export function haritaOlustur(el) {
   });
 
   function uzerinde(e) {
-    /* Fare üzerinde dolaşırken: saldırılabilir karakter mi, yürüme hedefi mi */
+    /* Fare üzerinde dolaşırken: saldırı ya da büyü hedefi mi (kendisi de olabilir), yürüme hedefi mi */
     const t = canliToken(e.target);
-    const saldiriHedefi = t && !t.veri.ben && !t.veri.olu && hareketEdebilir() ? t.veri.id : null;
-    hedefGuncelle(saldiriHedefi);
-    if (hareketEdebilir() && !saldiriHedefi && !(t && t.veri.ben)) {
+    hedefGuncelle(t && !t.veri.olu && hareketEdebilir() ? t.veri.id : null);
+    if (hareketEdebilir() && !t) {
       const p = dunyaya(e.clientX, e.clientY);
       onizleme = hedefHesapla(p.x, p.y);
     } else {
@@ -665,6 +758,13 @@ export function haritaOlustur(el) {
       t.goster = kareye(p.x - surukle.dx, p.y - surukle.dy);
       konumla(t);
       katmanCiz();
+    } else if (kip === 'yer') {
+      const y = yerdekiler.get(yerSurukle.id);
+      if (!y) return;
+      const p = dunyaya(e.clientX, e.clientY);
+      y.el.classList.add('is-dragging');
+      y.goster = kareye(p.x - yerSurukle.dx, p.y - yerSurukle.dy);
+      yerEsyasiCiz(y);
     } else if (kip === 'hayalet') {
       const p = dunyaya(e.clientX, e.clientY);
       istekAyar.set(hayalet.id, oturtulmus(kareye(p.x, p.y)));
@@ -705,10 +805,26 @@ export function haritaOlustur(el) {
         }
       }
     }
-    if (e.type === 'pointerup' && bas && !bas.kaydi && kip !== 'hayalet') dokun(e, bas);
+    if (kip === 'yer' && yerSurukle) {
+      const y = yerdekiler.get(yerSurukle.id);
+      if (y) {
+        y.el.classList.remove('is-dragging');
+        if (bas?.kaydi && e.type === 'pointerup') {
+          /* Bir tokenın üstüne bırakılırsa ona gider; sunucu karar verir */
+          y.goster = { x: sinirla(y.goster.x, 0, harita.genislik), y: sinirla(y.goster.y, 0, harita.yukseklik) };
+          dinleyici.esyaTasi(y.veri.id, y.goster.x, y.goster.y);
+        } else {
+          y.goster = { x: y.veri.x, y: y.veri.y };
+          if (e.type === 'pointerup' && bas && !bas.kaydi) dinleyici.esyaTikla(y.veri.id);
+        }
+        yerEsyasiCiz(y);
+      }
+    }
+    if (e.type === 'pointerup' && bas && !bas.kaydi && kip !== 'hayalet' && kip !== 'yer') dokun(e, bas);
     gorus.classList.remove('is-panning');
     kip = null;
     surukle = null;
+    yerSurukle = null;
     hayalet = null;
     kaydir = null;
     bas = null;
@@ -728,12 +844,12 @@ export function haritaOlustur(el) {
       if (!b.id) sec(null);
       return;
     }
-    const me = ben()?.id;
-    if (b.id && b.id !== me) {
-      dinleyici.saldir(b.id);
+    if (b.id) {
+      /* Başkasına: saldır ya da büyü yap; kendine: büyü yap */
+      dinleyici.etkiles(b.id);
       return;
     }
-    if (b.id === me || !hareketEdebilir()) return;
+    if (!hareketEdebilir()) return;
     const p = dunyaya(e.clientX, e.clientY);
     const hedef = hedefHesapla(p.x, p.y);
     if (!hedef) return;
@@ -758,6 +874,15 @@ export function haritaOlustur(el) {
         konumla(t);
       }
       surukle = null;
+    }
+    if (kip === 'yer' && yerSurukle) {
+      const y = yerdekiler.get(yerSurukle.id);
+      if (y) {
+        y.el.classList.remove('is-dragging');
+        y.goster = { x: y.veri.x, y: y.veri.y };
+        yerEsyasiCiz(y);
+      }
+      yerSurukle = null;
     }
     hayalet = null;
     gorus.classList.remove('is-panning');
@@ -842,6 +967,13 @@ export function haritaOlustur(el) {
       dinleyici[olay] = fn;
     },
     token: (id) => tokenler.get(id)?.veri ?? null,
+    yerEsyasi: (id) => yerdekiler.get(id)?.veri ?? null,
+    /** Ekrandaki noktanın haritadaki yeri, kare cinsinden (harita yoksa null) */
+    kareKonumu(cx, cy) {
+      if (!harita) return null;
+      const p = dunyaya(cx, cy);
+      return kareye(p.x, p.y);
+    },
     halkalariGoster(acik) {
       halkalar = acik;
       katmanCiz();

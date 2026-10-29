@@ -1,4 +1,4 @@
-import { h, uzanti } from './ortak.js';
+import { h, uzanti, sayiYaz } from './ortak.js';
 import { goster } from './pencere.js';
 
 /* Aynı eşyanın kopyalarını tek kartta topla: [{ esya, adet, siralar: [envanterdeki sıralar] }] */
@@ -6,7 +6,7 @@ export function grupla(envanter) {
   const gruplar = [];
   const anahtar = new Map();
   envanter.forEach((e, i) => {
-    const k = `${e.ad}\u0000${e.sinif}\u0000${e.resim}`;
+    const k = `${e.ad}\u0000${e.sinif}\u0000${e.resim}\u0000${e.agirlik}\u0000${e.sabit ? 1 : 0}`;
     let g = anahtar.get(k);
     if (!g) {
       g = { esya: e, adet: 0, siralar: [] };
@@ -21,9 +21,12 @@ export function grupla(envanter) {
 
 function gorsel(e) {
   if (e.url && e.gorsel && e.var !== false) return h('img', { class: 'item-img', src: e.url, alt: '', loading: 'lazy', decoding: 'async' });
+  if (e.sabit) return h('span', { class: 'item-icon is-fist', 'aria-hidden': 'true', text: '✊' });
   const yazi = e.resim ? (uzanti(e.resim) || 'dosya').toLocaleUpperCase('tr') : (e.ad || '?').slice(0, 2).toLocaleUpperCase('tr');
   return h('span', { class: 'item-icon', 'aria-hidden': 'true', text: yazi });
 }
+
+export const agirlikYaz = (e) => (e.sabit ? 'bırakılamaz' : `ağırlık ${sayiYaz(e.agirlik ?? 1)}`);
 
 // Eşya kartı: resim, ad ve sınıf
 export function esyaKarti(e, { adet, tikla, baslik, secili } = {}) {
@@ -37,21 +40,36 @@ export function esyaKarti(e, { adet, tikla, baslik, secili } = {}) {
   );
 }
 
-export function esyaOnizle(e, adet = 1) {
-  const icerik = [];
-  if (e.sinif) icerik.push(h('p', { class: 'modal-text' }, 'Sınıf: ', h('b', { text: e.sinif })));
+export function esyaOnizle(e, adet = 1, ekDugmeler = []) {
+  const satir = h('p', { class: 'modal-text' });
+  if (e.sinif) satir.append('Sınıf: ', h('b', { text: e.sinif }), ' · ');
+  if (e.sabit) satir.append('Herkeste var; bırakılamaz.');
+  else satir.append('Ağırlık: ', h('b', { text: sayiYaz(e.agirlik ?? 1) }));
+  const icerik = [satir];
   if (e.url && e.gorsel && e.var !== false) icerik.push(h('img', { class: 'preview-img', src: e.url, alt: e.ad }));
   else if (e.url && e.var !== false) icerik.push(h('p', { class: 'modal-text' }, h('a', { href: e.url, target: '_blank', rel: 'noopener', text: 'Dosyayı yeni sekmede aç' })));
   else if (e.resim) icerik.push(h('p', { class: 'modal-text', text: 'Bu eşyanın resmi artık oyun klasöründe yok.' }));
   if (adet > 1) icerik.push(h('p', { class: 'modal-text', text: `Sende ${adet} tane var.` }));
-  return goster({ baslik: e.ad, icerik, genis: Boolean(e.url && e.gorsel) });
+  return goster({ baslik: e.ad, icerik, genis: Boolean(e.url && e.gorsel), ekDugmeler });
 }
 
-// Oyuncunun kendi envanteri
-export function envanterCiz(liste, envanter) {
-  if (!envanter.length) {
-    liste.replaceChildren(h('li', { class: 'inventory-empty', text: 'Envanterin boş. GM sana eşya verdiğinde burada görünecek.' }));
-    return;
-  }
-  liste.replaceChildren(...grupla(envanter).map((g) => h('li', {}, esyaKarti(g.esya, { adet: g.adet, tikla: () => esyaOnizle(g.esya, g.adet) }))));
+/* Oyuncunun kendi envanteri. birak(sira, esya) verilirse önizlemede "Yere bırak" düğmesi çıkar (yumrukta çıkmaz). */
+export function envanterCiz(liste, envanter, { azami, birak } = {}) {
+  const kartlar = grupla(envanter).map((g) =>
+    h(
+      'li',
+      {},
+      esyaKarti(g.esya, {
+        adet: g.adet,
+        tikla: async () => {
+          const dugme = birak && !g.esya.sabit ? [{ metin: 'Yere bırak', deger: 'birak', sinif: 'btn-ghost' }] : [];
+          const sonuc = await esyaOnizle(g.esya, g.adet, dugme);
+          if (sonuc === 'birak') birak(g.siralar[g.siralar.length - 1], g.esya);
+        },
+      }),
+    ),
+  );
+  if (envanter.length <= 1) kartlar.push(h('li', { class: 'inventory-empty', text: 'GM sana eşya verince ya da yerdeki bir eşyanın üstüne yürüyünce burada görünür.' }));
+  else if (azami && envanter.length >= azami) kartlar.push(h('li', { class: 'inventory-empty', text: `Envanterin dolu (${azami} eşya). Yeni bir şey almak için bir eşyayı yere bırak.` }));
+  liste.replaceChildren(...kartlar);
 }

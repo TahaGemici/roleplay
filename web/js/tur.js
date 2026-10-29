@@ -37,7 +37,9 @@ export function turKartiOlustur(kok, { gonder }) {
     const metin =
       ist.tur === 'hareket'
         ? `Yürüme isteği${ben ? ` · ${sayiYaz(Math.hypot(ist.x2 - ben.x, ist.y2 - ben.y))} kare` : ''}`
-        : `Saldırı: ${ist.hedef_ad} (${ist.esya?.ad || 'eşya'})`;
+        : ist.tur === 'buyu'
+          ? `Büyü: ${ist.hedef === durum.ben.id ? 'kendine' : ist.hedef_ad} (${ist.buyu})`
+          : `Saldırı: ${ist.hedef_ad} (${ist.esya?.ad || 'eşya'})`;
     return h(
       'div',
       { class: 'pending' },
@@ -81,10 +83,12 @@ export function turKartiOlustur(kok, { gonder }) {
         h('p', {
           class: 'turn-free',
           text: gm
-            ? 'Turlar başlamadı: kimse yürüyemez, saldıramaz. Haritayı aç, karakterleri yerleştir ve soldaki panelden turları başlat.'
+            ? 'Turlar başlamadı: kimse yürüyemez, saldıramaz. Haritayı aç, oyuncuları soldaki listeden haritaya sürükleyerek yerleştir ve turları başlat.'
             : durum.olu
               ? 'Öldün. GM seni diriltebilir.'
-              : 'Turlar başlamadı. GM turları başlatınca sıran geldiğinde yürüyüp saldırabilirsin.',
+              : !durum.ben.yerde
+                ? 'Henüz haritada değilsin. GM seni haritaya yerleştirecek.'
+                : 'Turlar başlamadı. GM turları başlatınca sıran geldiğinde yürüyebilir, saldırabilir, büyü yapabilirsin.',
         }),
       );
       return;
@@ -113,7 +117,7 @@ export function turKartiOlustur(kok, { gonder }) {
           h('button', { class: 'btn btn-sm btn-ghost', type: 'button', onclick: () => gonder({ t: 'sira_durdur' }), text: 'Durdur' }),
         ),
       );
-      if (k?.npc) kok.append(h('p', { class: 'hint turn-hint', text: 'NPC\'nin sırası: onu sürükleyerek yürüt, Karakterler bölümünden saldırt, bitince "Sıradakine geç".' }));
+      if (k?.npc) kok.append(h('p', { class: 'hint turn-hint', text: 'NPC\'nin sırası: onu sürükleyerek yürüt, Karakterler bölümünden saldırt ya da büyü yaptır, bitince "Sıradakine geç".' }));
       return;
     }
 
@@ -129,7 +133,7 @@ export function turKartiOlustur(kok, { gonder }) {
       kok.append(enerjiSatiri(durum.statlar.enerji, s.toplam_enerji));
       const b = bekleyenIstek(durum.istek);
       if (b) kok.append(b);
-      else kok.append(h('p', { class: 'hint turn-hint', text: 'Yürümek için haritada bir yere, saldırmak için bir karaktere tıkla. İsteğin GM\'e gider.' }));
+      else kok.append(h('p', { class: 'hint turn-hint', text: 'Yürümek için haritada bir yere, saldırmak ya da büyü yapmak için bir karaktere (kendine büyü için kendine) tıkla. İsteğin GM\'e gider.' }));
       kok.append(h('button', { class: 'btn btn-primary end-turn', type: 'button', onclick: () => gonder({ t: 'tur_bitir' }), text: 'Turu bitir' }));
     }
   }
@@ -153,13 +157,13 @@ export function turKartiOlustur(kok, { gonder }) {
   };
 }
 
+/* GM'in düzenleyebildiği statlar. Ağırlık (yük) envanterden gelir; yalnızca gösterilir. */
 const STATLAR = [
   ['can', 'Can'],
   ['odak', 'Odak'],
   ['zirh', 'Zırh'],
   ['buyu_direnci', 'Büyü direnci'],
   ['enerji', 'Enerji'],
-  ['gorus', 'Görüş'],
 ];
 
 /** Oyuncunun kendi statları (başkalarınınkini yalnızca GM görür). */
@@ -167,11 +171,17 @@ export function durumKartiCiz(kok, durum) {
   const st = durum.statlar;
   kok.classList.toggle('is-dead', Boolean(durum.olu));
   kok.replaceChildren(
-    h('div', { class: 'stat-head' }, h('span', { class: 'stat-name', vars: { '--c': durum.ben.renk }, text: durum.ben.ad }), durum.olu ? h('span', { class: 'tag tag-dead', text: 'öldün' }) : null),
+    h(
+      'div',
+      { class: 'stat-head' },
+      h('span', { class: 'stat-name', vars: { '--c': durum.ben.renk }, text: durum.ben.ad }),
+      durum.olu ? h('span', { class: 'tag tag-dead', text: 'öldün' }) : !durum.ben.yerde ? h('span', { class: 'tag', text: 'haritada değil' }) : null,
+      h('button', { class: 'btn btn-sm btn-ghost stat-look', type: 'button', dataset: { gorunum: '1' }, title: 'Pulunun resmi ve şapkası', text: 'Görünüm' }),
+    ),
     h(
       'dl',
       { class: 'stats' },
-      ...STATLAR.map(([k, ad]) => h('div', { class: `stat stat-${k}` }, h('dt', { text: ad }), h('dd', { text: sayiYaz(st[k]) }))),
+      ...[...STATLAR, ['agirlik', 'Ağırlık']].map(([k, ad]) => h('div', { class: `stat stat-${k}` }, h('dt', { text: ad }), h('dd', { text: sayiYaz(st[k]) }))),
     ),
   );
 }

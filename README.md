@@ -4,8 +4,8 @@ Kendi sunucunda çalışan, Fallout 1 gibi sıra tabanlı bir sanal oyun masası
 
 - **GM ekranı:** `https://alanadin/gm`, GM şifresiyle girilir. GM her şeyi görür ve yönetir.
 - **Oyuncu ekranı:** `https://alanadin/`, isim ve oyun şifresiyle girilir. Oyuncu yalnızca kendi statlarını ve görüş menzilindekini görür.
-- **Sıra tabanlı:** Sırası gelen oyuncu haritaya tıklayıp yürür ya da bir karaktere tıklayıp saldırır. İkisi de GM'in onayına gider.
-- **Kurallar senin:** Enerji, hareket ve saldırı kurallarını `sunucu/kurallar.c` içinde C ile yazarsın.
+- **Sıra tabanlı:** Sırası gelen oyuncu haritaya tıklayıp yürür; bir karaktere tıklayıp saldırır ya da büyü yapar. Hepsi GM'in onayına gider.
+- **Kurallar senin:** Enerji, hareket, saldırı ve büyü kurallarını `sunucu/kurallar.c` içinde C ile yazarsın.
 - Sunucu C ile, arayüz düz HTML/CSS/JS ile yazıldı; bağımlılık yok.
 
 ## Kendi bilgisayarında dene
@@ -65,20 +65,26 @@ gh release download -R TahaGemici/roleplay -p roleplay.raw -p kur.sh --clobber &
 
 ## Oyun kuralları: `sunucu/kurallar.c`
 
-Sunucu üç fonksiyonunu çağırır:
+Sunucu dört fonksiyonunu çağırır:
 
 - `her_tur(o)`: bir karakterin sırası başlarken. `o->enerji` önce GM'in ayarladığı değere doldurulur.
 - `hareket(o, x, y)`: GM bir yürüyüşü onaylayınca. `1` döndürürsen karakter yürür, `0` döndürürsen yerinde kalır. Enerjiyi sen düşürürsün.
 - `saldiri(saldiran, hedef, esya)`: GM bir saldırıyı onaylayınca.
+- `buyu(yapan, hedef, buyu_adi)`: GM bir büyüyü onaylayınca. Hedef, yapanın kendisi de olabilir.
 
-Enerjisi 0 ya da altına inen karakterin sırası biter. Sırası bittiğinde canı 0 ya da altında olan herkes ölür.
+Ayrıca üç liste tanımlarsın: eşya sınıfları (`esya_siniflari`), büyüler (`buyuler`) ve herkeste olan bırakılamaz eşya (`yumruk`).
+
+Enerjisi 0 ya da altına inen karakterin sırası biter. Saldırı ya da büyüyle canı 0 ya da altına inen hemen ölür; başka yoldan inen sırası bitince ölür.
 
 ```c
 #include "kurallar.h"
 #include <math.h>
 #include <stddef.h>
+#include <string.h>
 
 const char *const esya_siniflari[] = { "silah", "zirh", "iksir", NULL };
+const char *const buyuler[] = { "Ateş topu", "İyileştir", NULL };
+const Esya yumruk = { .ad = "Yumruk", .sinif = "silah" };
 
 void her_tur(Oyuncu *o)
 {
@@ -87,7 +93,7 @@ void her_tur(Oyuncu *o)
 
 int hareket(Oyuncu *o, float x, float y)
 {
-    float bedel = hypotf(x - o->x, y - o->y);       /* kare başına 1 enerji */
+    float bedel = hypotf(x - o->x, y - o->y) + o->agirlik / 10; /* yük yürümeyi zorlaştırır */
     if (bedel > o->enerji) {
         bildir(o, "Enerjin yetmiyor.");
         return 0;
@@ -100,34 +106,64 @@ void saldiri(Oyuncu *saldiran, Oyuncu *hedef, Esya *esya)
 {
     saldiran->enerji -= 4;
     if (zar("1d20") + saldiran->odak > 10 + hedef->zirh) {
-        int hasar = zar("1d8");
+        int hasar = esya->sabit ? zar("1d4") : zar("1d8"); /* yumruk daha az vurur */
         hedef->can -= hasar;
         duyur("%s vurdu: %d hasar.", saldiran->ad, hasar);
     } else {
         duyur("%s ıskaladı.", saldiran->ad);
     }
 }
+
+void buyu(Oyuncu *yapan, Oyuncu *hedef, const char *buyu_adi)
+{
+    yapan->enerji -= 2;
+    if (strcmp(buyu_adi, "İyileştir") == 0) hedef->can += zar("1d6");
+    else hedef->can -= zar("1d8");
+}
 ```
 
 **Kullanabileceklerin** (`sunucu/kurallar.h`):
 
-- Karakter: `ad`, `x`, `y`, `can`, `odak`, `zirh`, `buyu_direnci`, `enerji`, `gorus`, `envanter[]` / `envanter_adet`, `npc`
-- Eşya: `ad`, `sinif`, `resim`
-- `zar("2d6+3")`, `zar_at(2, 6)`: zar atar
+- Karakter: `ad`, `x`, `y`, `can`, `odak`, `zirh`, `buyu_direnci`, `enerji`, `agirlik` (taşıdığı yük, salt okunur), `envanter[]` / `envanter_adet`, `npc`
+- Eşya: `ad`, `sinif`, `resim`, `agirlik`, `sabit` (yumrukta 1)
+- `zar("2d6+3")`, `zar_at(2, 6)`: zar atar. Sonucu GM ve o işteki oyuncular (yapan ve hedef) kayıtta görür.
 - `duyur(...)`: herkese, `bildir(o, ...)`: o oyuncuya ve GM'e, `gm_bildir(...)`: yalnızca GM'e yazar
-- `envanter_ekle(o, ad, sinif, resim)`, `envanter_cikar(o, sira)`
+- `envanter_ekle(o, ad, sinif, resim)`, `envanter_cikar(o, sira)`: envanterde en fazla `ENVANTER_AZAMI` (12) eşya olur; `envanter[0]` her zaman yumruktur ve çıkarılamaz.
 - `harita.genislik`, `harita.yukseklik`, `tur_sayisi`
 
 Fonksiyonlar hızlı bitmeli; çalışırken sunucu bekler. Değişiklikten sonra `make test` ile dene, `main`'e push'la ve sunucuda kurulum komutunu çalıştır.
 
 ## Nasıl oynanır
 
-**GM:** Harita yükler ve açar (ilk açışta kaç kare olduğunu seçer). NPC'leri ve oyuncuları tur sırasına koyup "Turları başlat"a basar. Oyuncuların yürüme ve saldırı isteklerini onaylar ya da reddeder. Karakterlerin statlarını, envanterlerini ve oyun klasöründeki dosyaları GM ekranından yönetir.
+**GM:**
 
-**Oyuncu:** Sırası gelince haritaya tıklayıp yürür, bir karaktere tıklayıp eşyasıyla saldırır. Enerjisi bitince ya da "Turu bitir"e basınca sıra geçer. Zar tepsisi `d20`, `2d6+3`, `4d6kh3` gibi ifadeleri anlar.
+- Harita yükler ve açar; ilk açışta kaç kare olduğunu seçer.
+- Oyuncular girince kendiliğinden haritaya konmaz. GM onları soldaki listeden haritaya sürükleyip bırakarak yerleştirir; haritada olmayan oyuncunun sırası geçilir.
+- Eşyaları katalogdan haritaya sürükler. Bir karakterin üstüne bırakılan eşya onun envanterine gider; boş yere bırakılan yerde durur ve üstüne yürüyen alır.
+- Tur sırasını kurar, "Turları başlat"a basar; yürüme, saldırı ve büyü isteklerini onaylar ya da reddeder.
+- Karakterlerin statlarını, eşyalarının ağırlığını, görünümünü (resim ve şapka) ve oyun klasöründeki dosyaları GM ekranından yönetir.
+- Görüş menzilini Ayarlar'dan herkes için tek bir değer olarak belirler. Yeni bir maç için "Maçı sıfırla"ya basar.
+
+**Oyuncu:**
+
+- Sırası gelince haritaya tıklayıp yürür.
+- Bir karaktere tıklayınca "Saldır" ya da "Büyü yap"ı seçer; kendine tıklayınca kendine büyü yapar.
+- Envanterdeki bir eşyayı yere bırakabilir; yumruk bırakılamaz.
+- Pulunun resmini ve şapkasını "Görünüm" düğmesinden kendisi seçer.
+- Taşıdığı yük arttıkça haritadaki pulu büyür.
+- Zar tepsisi `d20`, `2d6+3`, `4d6kh3` gibi ifadeleri anlar.
+
+## Oyunun verisi ve güncellemeler
+
+Oyunun bütün verisi `oyun/` klasöründedir (sunucuda `/var/lib/roleplay/oyun`):
+
+- `durum.json`: karakterler, statlar, envanterler, konumlar, keşfedilen yerler, yerdeki eşyalar, tur sırası, kayıt, ayarlar
+- `haritalar/`, `esyalar/`, `tokenlar/` (pul resimleri), `sapkalar/`
+
+Güncellemeden sonra hiçbir şeyi silmen gerekmez: yeni sürüm eski `durum.json`'u okur, eksik alanları tamamlar. Yeni bir maça başlamak için GM ekranındaki **Maçı sıfırla** düğmesini kullan. Bu düğme `durum.json`'daki maç bilgilerini siler; oyuncular, ayarlar ve haritalar kalır. Önceki hali `durum-sifirlamadan-once.json` olarak saklanır.
 
 ## Sınırlar
 
 - Bir sunucu tek bir oyun çalıştırır.
 - Harita bir resimdir, duvarları bilmez: görüş duvarlardan geçer. Engelleri GM yönetir.
-- Oyunun bütün verisi `oyun/` klasöründedir (sunucuda `/var/lib/roleplay/oyun`); yedek için bu klasörü kopyalamak yeter.
+- Yedek için `oyun/` klasörünü kopyalamak yeter.

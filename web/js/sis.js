@@ -5,8 +5,11 @@
  *   - şu an görülen yer (görüş dairesi): açık.
  * Keşfedilen alan, sunucunun gönderdiği kapsüllerin birleşimidir: yürürken görüş dairesinin taradığı şerit.
  * Tuval haritadan düşük çözünürlüklüdür; kenarlar zaten yumuşak.
+ * Tuval haritanın her kenarından KENAR piksel taşar: tuvalin kenarı yumuşatılırken yarı saydam kalan pikseller
+ * haritanın dışına düşer, haritanın kenarı sisin altından sızmaz.
  */
 const AZAMI_PIKSEL = 1600;
+const KENAR = 6; // tuval pikseli
 const KARANLIK = 'rgb(9, 11, 10)';
 const HATIRA_ACIKLIGI = 0.42; // görülmüş yerin ne kadar aydınlık kalacağı
 
@@ -18,12 +21,14 @@ export function sisOlustur(tuval) {
   let w = 0;
   let h = 0;
   let k = 1; // tuval pikseli / dünya pikseli
+  let sx = 1; // yuvarlanmış tuval boyuyla tam oran (yatay, dikey)
+  let sy = 1;
   let kare = 70; // bir karenin dünya pikseli
   let kapsuller = [];
   let daire = null; // { x, y, r } kare cinsinden
   let cizimBekliyor = false;
 
-  const px = (x, y) => [x * kare * k, y * kare * k];
+  const px = (x, y) => [x * kare * sx + KENAR, y * kare * sy + KENAR];
 
   function kapsulCiz([x1, y1, x2, y2, r]) {
     const [ax, ay] = px(x1, y1);
@@ -99,10 +104,17 @@ export function sisOlustur(tuval) {
         w = genislik;
         h = yukseklik;
         k = Math.min(1, AZAMI_PIKSEL / Math.max(w, h, 1));
-        tuval.width = maske.width = Math.max(1, Math.round(w * k));
-        tuval.height = maske.height = Math.max(1, Math.round(h * k));
-        tuval.style.width = `${w}px`;
-        tuval.style.height = `${h}px`;
+        const gw = Math.max(1, Math.round(w * k));
+        const gh = Math.max(1, Math.round(h * k));
+        tuval.width = maske.width = gw + 2 * KENAR;
+        tuval.height = maske.height = gh + 2 * KENAR;
+        /* Tuvalin bir pikseli dünyada w / gw piksel; taşan kenar da o ölçekle */
+        sx = gw / w;
+        sy = gh / h;
+        tuval.style.left = `${-KENAR / sx}px`;
+        tuval.style.top = `${-KENAR / sy}px`;
+        tuval.style.width = `${w + (2 * KENAR) / sx}px`;
+        tuval.style.height = `${h + (2 * KENAR) / sy}px`;
       }
       if (boyutDegisti || kareDegisti) maskeyiYenidenCiz();
       sonraCiz();

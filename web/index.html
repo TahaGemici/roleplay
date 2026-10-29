@@ -69,7 +69,7 @@
           <div class="sub-sec" id="gorus-ayar">
             <h3 class="sub-title">Görüş</h3>
             <label class="check"><input type="checkbox" id="iz-sis"> Görüş sisi</label>
-            <p class="hint">Açıkken her oyuncu yalnızca görüş menzilindekini görür. Daha önce gördüğü yerler eski haliyle, karartılmış durur; oradaki değişikliği görmez.</p>
+            <p class="hint">Açıkken her oyuncu yalnızca görüş menzilindekini görür. Daha önce gördüğü yerler eski haliyle, karartılmış durur; oradaki değişikliği görmez. Görüş menzili herkes için aynıdır; Ayarlar'dan değiştirilir.</p>
             <label class="check"><input type="checkbox" id="halkalar"> Oyuncuların görüş halkalarını göster (yalnızca sen)</label>
             <button class="btn btn-sm btn-danger" id="kesif-sifirla" type="button">Bu haritada keşfi sıfırla</button>
           </div>
@@ -107,7 +107,7 @@
             <button class="btn" id="sira-zarla" type="button">Zarla sırala</button>
             <button class="btn btn-primary" id="sira-baslat" type="button">Turları başlat</button>
           </div>
-          <p class="hint">Turlar başlamadan kimse yürüyemez ve saldıramaz. Sırası gelen karakterin enerjisi dolar ve sunucu <b>her_tur()</b>'u çağırır; yürüyüşte <b>hareket()</b>, saldırıda <b>saldiri()</b> enerjiyi düşürür. Enerjisi bitince ya da "Turu bitir"e basınca sıra geçer. Sıra bitince canı 0 ya da altında olan ölür. NPC'leri Karakterler bölümünden sıraya ekleyebilirsin.</p>
+          <p class="hint">Turlar başlamadan kimse yürüyemez, saldıramaz, büyü yapamaz. Sırası gelen karakterin enerjisi dolar ve sunucu <b>her_tur()</b>'u çağırır; yürüyüşte <b>hareket()</b>, saldırıda <b>saldiri()</b>, büyüde <b>buyu()</b> enerjiyi düşürür. Enerjisi bitince ya da "Turu bitir"e basınca sıra geçer. Saldırı ya da büyüyle canı 0 ya da altına inen hemen, başka yoldan inen sıra bitince ölür. Haritaya yerleşmemiş oyuncunun sırası geçilir. NPC'leri Karakterler bölümünden sıraya ekleyebilirsin.</p>
         </div>
       </details>
 
@@ -115,6 +115,7 @@
         <summary>Karakterler</summary>
         <div class="panel-body">
           <ul class="char-list" id="karakter-listesi"></ul>
+          <p class="hint hint-strong" id="yerlestir-ipucu" hidden></p>
           <button class="btn btn-block" id="npc-ekle" type="button">NPC ekle</button>
           <div class="char-editor" id="karakter-duzen" hidden>
             <div class="char-head">
@@ -134,6 +135,7 @@
               <label class="check"><input type="checkbox" id="kd-gizli"> Oyunculardan gizle</label>
             </div>
             <div class="stat-edit" id="kd-statlar"></div>
+            <p class="hint">Ağırlık (taşıdığı yük, eşyalardan gelir): <b id="kd-agirlik"></b></p>
             <div class="row-2" id="kd-islemler"></div>
             <div class="sub-head">
               <h3 class="sub-title">Envanter</h3>
@@ -166,6 +168,10 @@
               <span class="field-label">Sıra başında verilen enerji</span>
               <input class="input" id="ayar-enerji" type="number" min="0" max="100000" step="0.5" inputmode="decimal">
             </label>
+            <label class="field">
+              <span class="field-label">Görüş menzili (kare, herkes için)</span>
+              <input class="input" id="ayar-gorus" type="number" min="0" max="1000" step="0.5" inputmode="decimal">
+            </label>
             <button class="btn btn-primary" type="submit">Ayarları kaydet</button>
             <p class="hint">Şifreyi değiştirince oyuncular oyundan çıkar ve yeni şifreyle tekrar girer. GM şifresi sunucudaki <b>.env</b> dosyasındaki <b>GM_SIFRESI</b>'dir; değiştirmek kurulum işidir.</p>
           </form>
@@ -173,15 +179,21 @@
             <span class="field-label">Oyuncular</span>
             <ul class="player-admin" id="oyuncu-yonetim"></ul>
           </div>
+          <div class="sub-sec">
+            <h3 class="sub-title">Maç</h3>
+            <p class="hint">Yeni bir maç için: NPC'ler, statlar, envanterler, konumlar, keşifler, yerdeki eşyalar, tur sırası ve kayıt silinir; oyuncular, ayarlar ve haritalar kalır.</p>
+            <button class="btn btn-danger" id="mac-sifirla" type="button">Maçı sıfırla</button>
+          </div>
         </div>
       </details>
     </aside>
 
     <main class="board felt" id="masa">
-      <div class="viewport" id="gorus" tabindex="0" aria-label="Harita. Bir yere tıklayarak yürüme isteği gönder, bir karaktere tıklayarak saldır, sürükleyerek kaydır, tekerlekle yakınlaştır, sağ tıkla işaret bırak.">
+      <div class="viewport" id="gorus" tabindex="0" aria-label="Harita. Bir yere tıklayarak yürüme isteği gönder, bir karaktere tıklayarak saldır ya da büyü yap, sürükleyerek kaydır, tekerlekle yakınlaştır, sağ tıkla işaret bırak.">
         <div class="world" id="dunya" hidden>
           <img class="map-img" id="harita-resim" alt="" draggable="false" decoding="async">
           <div class="grid" id="izgara" hidden></div>
+          <div class="ground" id="yerdekiler"></div>
           <div class="tokens" id="tokenler"></div>
           <canvas class="fog" id="sis" hidden></canvas>
           <svg class="overlay" id="katman" aria-hidden="true"></svg>
@@ -231,11 +243,6 @@
           <input class="input input-felt" id="zar-ifade" maxlength="120" placeholder="2d6+3 ateş topu" aria-label="Zar ifadesi">
           <button class="btn btn-sm btn-felt" type="submit">At</button>
         </form>
-        <div class="tray-row">
-          <button class="btn btn-sm btn-felt" type="button" data-roll="2d20kh1" title="İki d20 at, yüksek olanı al">Avantaj</button>
-          <button class="btn btn-sm btn-felt" type="button" data-roll="2d20kl1" title="İki d20 at, düşük olanı al">Dezavantaj</button>
-          <label class="check check-felt" id="gizli-etiket"><input type="checkbox" id="zar-gizli"> Gizli at</label>
-        </div>
       </section>
     </aside>
   </div>

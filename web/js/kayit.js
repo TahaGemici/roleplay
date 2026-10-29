@@ -3,7 +3,8 @@ import { zarSimgesi } from './zar-sekilleri.js';
 
 const AZAMI = 300;
 
-/** Olay kaydı: zar sonuçları, sıra değişimleri, saldırılar, ölümler, kuralların duyuruları, eşya bildirimleri. */
+/** Olay kaydı: zar sonuçları (kuralların attıkları da), sıra değişimleri, saldırılar, büyüler, ölümler, kuralların
+ * duyuruları, eşya bildirimleri. */
 export function kayitOlustur(liste) {
   const altaYakin = () => liste.scrollHeight - liste.scrollTop - liste.clientHeight < 80;
   const sonaKaydir = () => {
@@ -56,10 +57,12 @@ export function kayitOlustur(liste) {
     const toplam = h('output', { class: 'roll-total', 'aria-hidden': 'true', text: String(s.toplam) });
     const bayrak = dogal === 20 ? 'doğal 20' : dogal === 1 ? 'doğal 1' : null;
     const siniflar = ['entry', 'roll'];
+    if (g.kural) siniflar.push('is-rule');
     if (dogal === 20) siniflar.push('is-crit');
     if (dogal === 1) siniflar.push('is-fumble');
     if (canli) siniflar.push('is-fresh');
-    const okunan = `${g.kim}${s.etiket ? `, ${s.etiket}` : ''}: ${s.gosterim} = ${s.toplam}${bayrak ? `, ${bayrak}` : ''}`;
+    const kuralEtiketi = g.kural ? (g.baglam ? `kurallar · ${g.baglam}` : 'kurallar') : null;
+    const okunan = `${g.kim}${kuralEtiketi ? ` (${kuralEtiketi})` : ''}${s.etiket ? `, ${s.etiket}` : ''}: ${s.gosterim} = ${s.toplam}${bayrak ? `, ${bayrak}` : ''}`;
 
     const kart = h(
       'li',
@@ -68,7 +71,7 @@ export function kayitOlustur(liste) {
         'div',
         { class: 'entry-head' },
         h('span', { class: 'who', text: g.kim }),
-        g.gizli ? h('span', { class: 'tag', text: 'gizli' }) : null,
+        kuralEtiketi ? h('span', { class: 'tag', text: kuralEtiketi }) : null,
         zaman(g),
       ),
       s.etiket ? h('p', { class: 'roll-label', text: s.etiket }) : null,
@@ -107,7 +110,7 @@ export function kayitOlustur(liste) {
     switch (g.tur) {
       case 'zar':
         return zarKarti(g, canli);
-      case 'gizli_zar':
+      case 'gizli_zar': /* eski kayıtlar: gizli atış artık yok */
         return h(
           'li',
           { class: 'entry secret', vars: { '--c': g.renk } },
@@ -126,6 +129,8 @@ export function kayitOlustur(liste) {
         return satir(g, 'item', 'envanter');
       case 'saldiri':
         return satir(g, 'attack');
+      case 'buyu':
+        return satir(g, 'spell');
       case 'olum':
         return satir(g, 'death');
       default:

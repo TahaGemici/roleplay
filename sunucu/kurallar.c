@@ -1,13 +1,14 @@
 /*
  * ===================== OYUN KURALLARIN BURAYA =====================
  *
- * Sunucu bu dosyadaki üç fonksiyonu çağırır:
+ * Sunucu bu dosyadaki dört fonksiyonu çağırır:
  *
  *   her_tur(o)                      bir karakterin sırası başladığında
  *   hareket(o, x, y)                GM sırası gelen oyuncunun yürüyüşünü onayladığında
  *   saldiri(saldiran, hedef, esya)  GM bir saldırıyı onayladığında
+ *   buyu(yapan, hedef, buyu_adi)    GM bir büyüyü onayladığında
  *
- * Turlar başlamadan kimse yürüyemez ve saldıramaz; üçü de yalnızca tur sırasında çağrılır.
+ * Turlar başlamadan kimse yürüyemez, saldıramaz, büyü yapamaz; dördü de yalnızca tur sırasında çağrılır.
  *
  * Bir Oyuncu'da (oyuncular da NPC'ler de) şunlar var (ayrıntılar kurallar.h içinde):
  *
@@ -15,15 +16,16 @@
  *   o->x, o->y                  konumu, kare biriminde (değiştirirsen taşınır)
  *   o->can, o->odak, o->zirh, o->buyu_direnci
  *   o->enerji                   aksiyon puanı; 0 olunca sıra geçer (ne kadar harcanacağını sen yazarsın)
- *   o->gorus                    görüş menzili (kare)
- *   o->envanter[i]              eşyalar: .ad, .sinif, .resim  (i < o->envanter_adet)
+ *   o->agirlik                  taşıdığı yük: eşyaların ağırlıkları toplamı (salt okunur)
+ *   o->envanter[i]              eşyalar: .ad, .sinif, .resim, .agirlik  (i < o->envanter_adet;
+ *                               envanter[0] her zaman yumruk, en fazla ENVANTER_AZAMI eşya)
  *   o->npc                      1 ise GM'in karakteri
  *
  *   harita.genislik, harita.yukseklik   açık haritanın boyutu (kare; GM haritayı açarken seçer)
  *   tur_sayisi                          kaçıncı tur
  *
- *   zar_at(2, 6)          2d6 atar, toplamı döner
- *   zar("1d20+5")         ifadeyle zar atar
+ *   zar_at(2, 6)          2d6 atar, toplamı döner (sonucu GM ve o işteki oyuncular kayıtta görür)
+ *   zar("1d20+5")         ifadeyle zar atar (aynı şekilde kayda yazılır)
  *   duyur("...", ...)     herkesin ekranındaki kayda yazar (printf gibi)
  *   gm_bildir("...", ...) yalnızca GM'in kaydına yazar
  *   bildir(o, "...", ...) yalnızca o oyuncunun ve GM'in kaydına yazar
@@ -49,6 +51,22 @@ const char *const esya_siniflari[] = {
     "silah",
     "zirh",
     "iksir",
+    NULL
+};
+
+/* ------------------------------------------------------------------ yumruk
+ *
+ * Herkesin envanterinde baştan olan, bırakılamayan eşya (envanter[0]). saldiri() onu da alır.
+ */
+const Esya yumruk = { .ad = "Yumruk", .sinif = "silah", .agirlik = 0 };
+
+/* ------------------------------------------------------------------ büyüler
+ *
+ * Oyuncu bir karaktere (ya da kendine) tıklayıp "Büyü yap"ı seçince bu listeden seçer. Listenin sonu NULL kalmalı.
+ */
+const char *const buyuler[] = {
+    "Ateş topu",
+    "İyileştir",
     NULL
 };
 
@@ -115,5 +133,27 @@ void saldiri(Oyuncu *saldiran, Oyuncu *hedef, Esya *esya)
         bildir(saldiran, "SALDIRI: %s -> %s [%s/%s] can %.0f", saldiran->ad, hedef->ad, esya->ad, esya->sinif, hedef->can);
     } else{
         bildir(saldiran, "Enerjin yetmiyor!");
+    }
+}
+
+/* ------------------------------------------------------------------ GM bir büyüyü onaylayınca
+ *
+ * buyu_adi yukarıdaki buyuler listesinden biridir. hedef, yapanın kendisi de olabilir.
+ * Canı 0 ya da altına inen hemen ölür; yapanın enerjisi biterse sırası geçer.
+ */
+void buyu(Oyuncu *yapan, Oyuncu *hedef, const char *buyu_adi)
+{
+    int bedel = 2;
+    if (yapan->enerji < bedel) {
+        bildir(yapan, "Enerjin yetmiyor!");
+        return;
+    }
+    yapan->enerji -= bedel;
+
+    if (strcmp(buyu_adi, "İyileştir") == 0) {
+        hedef->can += zar("1d6");
+    } else if (strcmp(buyu_adi, "Ateş topu") == 0) {
+        int hasar = zar("1d8") - (int)hedef->buyu_direnci;
+        if (hasar > 0) hedef->can -= hasar;
     }
 }
