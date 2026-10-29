@@ -1,0 +1,9 @@
+# /etc/caddy/Caddyfile — Docker kullanmayan kurulum için.
+# "oyun.ornek.com" yerine kendi alan adını yaz, sonra:  sudo systemctl reload caddy
+# Caddy sertifikayı otomatik alır/yeniler ve WebSocket bağlantılarını kendiliğinden taşır.
+
+oyun.ornek.com {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:3000
+	header Strict-Transport-Security "max-age=31536000"
+}

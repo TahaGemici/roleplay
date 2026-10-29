@@ -1,0 +1,34 @@
+# Zar Masası — derleme
+#   make          sunucuyu derler (./zar-masasi)
+#   make test     birim testlerini çalıştırır
+#   make temizle  derleme çıktılarını siler
+
+CC      ?= cc
+CFLAGS  ?= -O2 -g
+override CFLAGS  += -std=c11 -D_GNU_SOURCE -Wall -Wextra -Wno-unused-parameter -Wno-format-truncation -pthread
+override LDFLAGS += -pthread
+override LDLIBS  += -lm
+
+# Kendi kurallarını başka bir dosyada tutmak istersen:  make KURALLAR=benim_kurallarim.c
+KURALLAR ?= sunucu/kurallar.c
+HEDEF    ?= zar-masasi
+
+KAYNAK = sunucu/main.c sunucu/oyun.c $(KURALLAR) sunucu/http.c sunucu/ws.c \
+         sunucu/json.c sunucu/zar.c sunucu/gorsel.c sunucu/dosya.c sunucu/geometri.c sunucu/ortak.c
+BASLIK = $(wildcard sunucu/*.h)
+
+$(HEDEF): $(KAYNAK) $(BASLIK)
+	$(CC) $(CFLAGS) -Isunucu -o $@ $(KAYNAK) $(LDFLAGS) $(LDLIBS)
+
+TEST_KAYNAK = test/birim.c sunucu/json.c sunucu/zar.c sunucu/gorsel.c sunucu/dosya.c sunucu/geometri.c sunucu/ortak.c
+
+test/birim: $(TEST_KAYNAK) $(BASLIK)
+	$(CC) $(CFLAGS) -Isunucu -o $@ $(TEST_KAYNAK) $(LDFLAGS) $(LDLIBS)
+
+test: test/birim
+	./test/birim
+
+temizle:
+	rm -f zar-masasi zar-masasi-test zar-masasi-tsan test/birim
+
+.PHONY: test temizle

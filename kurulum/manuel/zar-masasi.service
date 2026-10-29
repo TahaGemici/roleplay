@@ -1,0 +1,27 @@
+# /etc/systemd/system/zar-masasi.service
+# Kurulum:  sudo systemctl daemon-reload && sudo systemctl enable --now zar-masasi
+# Günlük:   journalctl -u zar-masasi -f        (açılış mesajları ve hatalar)
+
+[Unit]
+Description=Zar Masası (sanal oyun masası, C sunucusu)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=zarmasasi
+Group=zarmasasi
+WorkingDirectory=/opt/zar-masasi
+ExecStart=/opt/zar-masasi/zar-masasi
+Restart=on-failure
+RestartSec=2
+
+# Sertleştirme: program yalnızca oyun klasörüne yazabilir.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/zar-masasi/oyun
+
+[Install]
+WantedBy=multi-user.target

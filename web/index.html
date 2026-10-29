@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#241a14">
+  <title>Zar Masası</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/yazitipleri.css">
+  <link rel="stylesheet" href="/stil.css">
+  <script type="module" src="/js/ana.js"></script>
+</head>
+<body>
+  <div class="boot felt" id="boot"></div>
+
+  <!-- Giriş: oyuncu (ad + oyun şifresi) ya da GM (GM şifresi) -->
+  <main class="login felt" id="giris" hidden>
+    <form class="login-card" id="giris-formu" novalidate>
+      <svg class="mark login-mark" viewBox="0 0 64 64" aria-hidden="true">
+        <g fill="none" stroke="currentColor" stroke-linejoin="round" stroke-linecap="round">
+          <polygon points="32,3 57.1,17.5 57.1,46.5 32,61 6.9,46.5 6.9,17.5" stroke-width="2.4"/>
+          <polygon points="32,15.5 47,41.5 17,41.5" stroke-width="1.8"/>
+          <path d="M32 3V15.5M57.1 17.5L32 15.5M6.9 17.5L32 15.5M57.1 17.5L47 41.5M57.1 46.5L47 41.5M32 61L47 41.5M32 61L17 41.5M6.9 46.5L17 41.5M6.9 17.5L17 41.5" stroke-width="1.2" opacity=".55"/>
+        </g>
+        <text class="mark-num" x="32" y="33.5" text-anchor="middle" dominant-baseline="central">20</text>
+      </svg>
+      <div class="login-head">
+        <h1 class="login-title" id="giris-baslik">Zar Masası</h1>
+        <p class="login-sub" id="giris-alt">Oyuna katıl</p>
+      </div>
+      <div class="login-fields">
+        <label class="field" id="giris-ad-alani">
+          <span class="field-label">Adın</span>
+          <input class="input" id="giris-ad" maxlength="24" autocomplete="nickname" required>
+        </label>
+        <label class="field">
+          <span class="field-label" id="giris-sifre-etiket">Oyun şifresi</span>
+          <input class="input" id="giris-sifre" type="password" autocomplete="current-password" required>
+        </label>
+      </div>
+      <p class="login-note" id="giris-not" hidden></p>
+      <p class="form-error" id="giris-hata" role="alert"></p>
+      <button class="btn btn-primary btn-block btn-lg" id="giris-dugme" type="submit">Oyuna gir</button>
+    </form>
+  </main>
+
+  <!-- Oyun -->
+  <div class="app" id="uygulama" hidden>
+    <header class="topbar">
+      <button class="btn btn-ghost btn-sm only-narrow gm-only" id="ac-gm" type="button" aria-controls="gm-panel" aria-expanded="false">Panel</button>
+      <h1 class="scene-title" id="sahne-adi"></h1>
+      <button class="btn btn-sm gm-only" id="dosyalar-ac" type="button">Dosyalar</button>
+      <ul class="presence" id="kimler" aria-label="Oyundakiler"></ul>
+      <button class="btn btn-ghost btn-sm" id="cikis" type="button">Çıkış</button>
+      <button class="btn btn-ghost btn-sm only-narrow" id="ac-yan" type="button" aria-controls="yan" aria-expanded="false"><span id="ac-yan-metin">Sıra ve zar</span> <span class="badge" id="rozet" hidden></span></button>
+    </header>
+
+    <aside class="gm-panel gm-only" id="gm-panel" aria-label="GM paneli">
+      <details class="panel-sec" open>
+        <summary>Harita</summary>
+        <div class="panel-body">
+          <ul class="library" id="haritalar"></ul>
+          <div class="row-2">
+            <button class="btn btn-primary" id="harita-yukle" type="button">Harita yükle</button>
+            <button class="btn" id="harita-kapat" type="button">Haritayı kapat</button>
+          </div>
+          <label class="check"><input type="checkbox" id="harita-gizli"> Haritayı oyunculardan gizle</label>
+          <div class="sub-sec" id="gorus-ayar">
+            <h3 class="sub-title">Görüş</h3>
+            <label class="check"><input type="checkbox" id="iz-sis"> Görüş sisi</label>
+            <p class="hint">Açıkken her oyuncu yalnızca görüş menzilindekini görür. Daha önce gördüğü yerler eski haliyle, karartılmış durur; oradaki değişikliği görmez.</p>
+            <label class="check"><input type="checkbox" id="halkalar"> Oyuncuların görüş halkalarını göster (yalnızca sen)</label>
+            <button class="btn btn-sm btn-danger" id="kesif-sifirla" type="button">Bu haritada keşfi sıfırla</button>
+          </div>
+          <div class="sub-sec" id="izgara-ayar">
+            <h3 class="sub-title">Harita boyutu</h3>
+            <div class="row-2">
+              <label class="field">
+                <span class="field-label">Genişlik (kare)</span>
+                <input class="input" id="iz-gen" type="number" min="1" max="1000" step="any" inputmode="decimal">
+              </label>
+              <label class="field">
+                <span class="field-label">Yükseklik (kare)</span>
+                <input class="input" id="iz-yuk" type="number" min="1" max="1000" step="any" inputmode="decimal">
+              </label>
+            </div>
+            <p class="hint">Harita bu kadar kareye bölünür; konumlar, görüş ve yürüyüş bu karelerle ölçülür (1 kare = 1 birim). Resimde çizili kareler varsa onların sayısını yaz.</p>
+            <label class="field">
+              <span class="field-label">Izgara çizgileri <output id="iz-op-o"></output></span>
+              <input type="range" id="iz-op" min="0.05" max="1" step="0.05">
+            </label>
+            <div class="row-2">
+              <label class="check"><input type="checkbox" id="iz-gorunur"> Çizgileri göster</label>
+              <label class="check"><input type="checkbox" id="iz-acik"> Açık renk</label>
+            </div>
+            <label class="check"><input type="checkbox" id="iz-oturt"> Hareket hedefleri kare ortasına otursun</label>
+          </div>
+        </div>
+      </details>
+
+      <details class="panel-sec" open>
+        <summary>Tur sırası</summary>
+        <div class="panel-body">
+          <ol class="order-list" id="sira-listesi"></ol>
+          <div class="row-2">
+            <button class="btn" id="sira-zarla" type="button">Zarla sırala</button>
+            <button class="btn btn-primary" id="sira-baslat" type="button">Turları başlat</button>
+          </div>
+          <p class="hint">Turlar başlamadan kimse yürüyemez ve saldıramaz. Sırası gelen karakterin enerjisi dolar ve sunucu <b>her_tur()</b>'u çağırır; yürüyüşte <b>hareket()</b>, saldırıda <b>saldiri()</b> enerjiyi düşürür. Enerjisi bitince ya da "Turu bitir"e basınca sıra geçer. Sıra bitince canı 0 ya da altında olan ölür. NPC'leri Karakterler bölümünden sıraya ekleyebilirsin.</p>
+        </div>
+      </details>
+
+      <details class="panel-sec" open>
+        <summary>Karakterler</summary>
+        <div class="panel-body">
+          <ul class="char-list" id="karakter-listesi"></ul>
+          <button class="btn btn-block" id="npc-ekle" type="button">NPC ekle</button>
+          <div class="char-editor" id="karakter-duzen" hidden>
+            <div class="char-head">
+              <span class="dot" id="kd-nokta"></span>
+              <h3 class="char-title" id="kd-baslik"></h3>
+              <span class="tag" id="kd-etiket"></span>
+            </div>
+            <div class="npc-only-fields" id="kd-npc">
+              <label class="field">
+                <span class="field-label">Ad</span>
+                <input class="input" id="kd-ad" maxlength="24" autocomplete="off">
+              </label>
+              <div class="field">
+                <span class="field-label" id="kd-renk-etiket">Renk</span>
+                <div class="swatches" id="kd-renkler" role="radiogroup" aria-labelledby="kd-renk-etiket"></div>
+              </div>
+              <label class="check"><input type="checkbox" id="kd-gizli"> Oyunculardan gizle</label>
+            </div>
+            <div class="stat-edit" id="kd-statlar"></div>
+            <div class="row-2" id="kd-islemler"></div>
+            <div class="sub-head">
+              <h3 class="sub-title">Envanter</h3>
+              <span class="hint" id="kd-env-sayi"></span>
+            </div>
+            <ul class="inv-list" id="kd-envanter"></ul>
+          </div>
+          <div class="sub-head">
+            <h3 class="sub-title">Eşyalar</h3>
+            <button class="btn btn-sm" id="esya-yukle" type="button">Eşya yükle</button>
+          </div>
+          <p class="hint" id="esya-ipucu">Önce bir karakter seç; sonra bir eşyaya tıklayınca ona verilir.</p>
+          <div class="catalog" id="esyalar"></div>
+        </div>
+      </details>
+
+      <details class="panel-sec">
+        <summary>Ayarlar</summary>
+        <div class="panel-body">
+          <form class="settings" id="ayar-formu">
+            <label class="field">
+              <span class="field-label">Oyunun adı</span>
+              <input class="input" id="ayar-ad" maxlength="40">
+            </label>
+            <label class="field">
+              <span class="field-label">Oyun şifresi (oyuncular için)</span>
+              <input class="input" id="ayar-sifre" maxlength="64" autocomplete="off" spellcheck="false">
+            </label>
+            <label class="field">
+              <span class="field-label">Sıra başında verilen enerji</span>
+              <input class="input" id="ayar-enerji" type="number" min="0" max="100000" step="0.5" inputmode="decimal">
+            </label>
+            <button class="btn btn-primary" type="submit">Ayarları kaydet</button>
+            <p class="hint">Şifreyi değiştirince oyuncular oyundan çıkar ve yeni şifreyle tekrar girer. GM şifresi sunucudaki <b>.env</b> dosyasındaki <b>GM_SIFRESI</b>'dir; değiştirmek kurulum işidir.</p>
+          </form>
+          <div class="field">
+            <span class="field-label">Oyuncular</span>
+            <ul class="player-admin" id="oyuncu-yonetim"></ul>
+          </div>
+        </div>
+      </details>
+    </aside>
+
+    <main class="board felt" id="masa">
+      <div class="viewport" id="gorus" tabindex="0" aria-label="Harita. Bir yere tıklayarak yürüme isteği gönder, bir karaktere tıklayarak saldır, sürükleyerek kaydır, tekerlekle yakınlaştır, sağ tıkla işaret bırak.">
+        <div class="world" id="dunya" hidden>
+          <img class="map-img" id="harita-resim" alt="" draggable="false" decoding="async">
+          <div class="grid" id="izgara" hidden></div>
+          <div class="tokens" id="tokenler"></div>
+          <canvas class="fog" id="sis" hidden></canvas>
+          <svg class="overlay" id="katman" aria-hidden="true"></svg>
+          <div class="labels" id="etiketler"></div>
+          <div class="effects" id="efektler"></div>
+          <div class="pings" id="isaretler"></div>
+        </div>
+      </div>
+      <div class="empty" id="bos">
+        <svg class="mark empty-mark" viewBox="0 0 64 64" aria-hidden="true">
+          <g fill="none" stroke="currentColor" stroke-linejoin="round" stroke-linecap="round">
+            <polygon points="32,3 57.1,17.5 57.1,46.5 32,61 6.9,46.5 6.9,17.5" stroke-width="2"/>
+            <polygon points="32,15.5 47,41.5 17,41.5" stroke-width="1.5"/>
+            <path d="M32 3V15.5M57.1 17.5L32 15.5M6.9 17.5L32 15.5M57.1 17.5L47 41.5M57.1 46.5L47 41.5M32 61L47 41.5M32 61L17 41.5M6.9 46.5L17 41.5M6.9 17.5L17 41.5" stroke-width="1" opacity=".55"/>
+          </g>
+        </svg>
+        <h2 class="empty-title" id="bos-baslik">Henüz açık bir harita yok</h2>
+        <p class="empty-text" id="bos-metin">GM bir harita açtığında burada belirecek.</p>
+      </div>
+      <div class="map-status" id="harita-durum" hidden>
+        <span class="status-dot" aria-hidden="true"></span>
+        <span class="status-text" id="harita-durum-metin"></span>
+      </div>
+      <div class="zoom" id="yakinlik" hidden>
+        <button type="button" data-zoom="out" aria-label="Uzaklaştır">−</button>
+        <button type="button" data-zoom="fit" class="zoom-fit" title="Haritayı ekrana sığdır">Sığdır</button>
+        <button type="button" data-zoom="in" aria-label="Yakınlaştır">+</button>
+      </div>
+      <div class="drop-hint" id="birak" hidden>Bırak; haritalar klasörüne yüklensin</div>
+    </main>
+
+    <aside class="side" id="yan" aria-label="Durum, sıra, envanter ve zarlar">
+      <section class="stat-card oyuncu-only" id="durum-karti" aria-label="Durumun"></section>
+      <section class="turn-card" id="tur-karti" aria-live="polite"></section>
+      <section class="requests gm-only" id="istekler" aria-label="Bekleyen istekler" aria-live="polite" hidden></section>
+      <div class="tabs" role="tablist" id="sekmeler">
+        <button class="tab" role="tab" id="sekme-kayit" aria-selected="true" aria-controls="kayit" type="button">Kayıt</button>
+        <button class="tab oyuncu-only" role="tab" id="sekme-envanter" aria-selected="false" aria-controls="envanter" type="button">Envanter <span class="tab-count" id="envanter-sayi"></span></button>
+      </div>
+      <ol class="log" id="kayit" role="tabpanel" aria-labelledby="sekme-kayit" aria-live="polite" aria-relevant="additions"></ol>
+      <div class="inventory" id="envanter" role="tabpanel" aria-labelledby="sekme-envanter" hidden>
+        <ul class="item-grid" id="envanter-liste"></ul>
+      </div>
+      <section class="tray" aria-label="Zar tepsisi">
+        <div class="tray-dice" id="zarlar"></div>
+        <form class="tray-row" id="zar-formu" autocomplete="off">
+          <input class="input input-felt" id="zar-ifade" maxlength="120" placeholder="2d6+3 ateş topu" aria-label="Zar ifadesi">
+          <button class="btn btn-sm btn-felt" type="submit">At</button>
+        </form>
+        <div class="tray-row">
+          <button class="btn btn-sm btn-felt" type="button" data-roll="2d20kh1" title="İki d20 at, yüksek olanı al">Avantaj</button>
+          <button class="btn btn-sm btn-felt" type="button" data-roll="2d20kl1" title="İki d20 at, düşük olanı al">Dezavantaj</button>
+          <label class="check check-felt" id="gizli-etiket"><input type="checkbox" id="zar-gizli"> Gizli at</label>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <!-- Dosya yöneticisi (GM) -->
+  <dialog class="files" id="dosyalar" aria-labelledby="dosyalar-baslik">
+    <div class="files-head">
+      <h2 class="files-title" id="dosyalar-baslik">Oyun klasörü</h2>
+      <nav class="crumbs" id="dosya-yol" aria-label="Klasör yolu"></nav>
+      <div class="files-actions">
+        <button class="btn btn-sm" id="dosya-klasor" type="button">Yeni klasör</button>
+        <button class="btn btn-sm btn-primary" id="dosya-yukle" type="button">Dosya yükle</button>
+        <button class="btn btn-sm btn-ghost" id="dosyalar-kapat" type="button">Kapat</button>
+      </div>
+    </div>
+    <div class="files-body" id="dosya-alani">
+      <table class="file-table">
+        <thead><tr><th scope="col">Ad</th><th scope="col" class="num">Boyut</th><th scope="col" class="num">Değişti</th><th scope="col"><span class="sr-only">İşlemler</span></th></tr></thead>
+        <tbody id="dosya-liste"></tbody>
+      </table>
+      <p class="files-empty" id="dosya-bos" hidden>Bu klasör boş. Dosyaları buraya sürükleyip bırakabilirsin.</p>
+      <div class="drop-hint" id="dosya-birak" hidden>Bırak; bu klasöre yüklensin</div>
+    </div>
+    <p class="files-foot" id="dosya-durum"></p>
+  </dialog>
+
+  <!-- Genel pencereler -->
+  <dialog class="modal" id="pencere">
+    <form method="dialog" class="modal-body" id="pencere-form">
+      <h2 class="modal-title" id="pencere-baslik"></h2>
+      <div id="pencere-icerik"></div>
+      <div class="modal-actions" id="pencere-dugmeler"></div>
+    </form>
+  </dialog>
+
+  <div class="conn" id="baglanti" role="status" hidden></div>
+  <div class="toasts" id="bildirimler"></div>
+  <input type="file" id="dosya-sec" multiple hidden>
+</body>
+</html>
