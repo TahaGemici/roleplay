@@ -26,7 +26,7 @@ function gorsel(e) {
   return h('span', { class: 'item-icon', 'aria-hidden': 'true', text: yazi });
 }
 
-export const agirlikYaz = (e) => (e.sabit ? 'bırakılamaz' : `ağırlık ${sayiYaz(e.agirlik ?? 1)} · day. ${sayiYaz(e.dayaniklilik ?? 100)}`);
+export const agirlikYaz = (e) => (e.sabit ? 'bırakılamaz' : `ağırlık ${sayiYaz(e.agirlik)} · day. ${sayiYaz(e.dayaniklilik)}`);
 
 // Eşya kartı: resim, ad ve sınıf
 export function esyaKarti(e, { adet, tikla, baslik, secili } = {}) {
@@ -44,8 +44,8 @@ export function esyaOnizle(e, adet = 1, ekDugmeler = []) {
   const satir = h('p', { class: 'modal-text' });
   if (e.sinif) satir.append('Sınıf: ', h('b', { text: e.sinif }), ' · ');
   if (e.sabit) satir.append('Herkeste var; bırakılamaz. · ');
-  else satir.append('Ağırlık: ', h('b', { text: sayiYaz(e.agirlik ?? 1) }), ' · ');
-  satir.append('Dayanıklılık: ', h('b', { text: sayiYaz(e.dayaniklilik ?? 100) }));
+  else satir.append('Ağırlık: ', h('b', { text: sayiYaz(e.agirlik) }), ' · ');
+  satir.append('Dayanıklılık: ', h('b', { text: sayiYaz(e.dayaniklilik) }));
   const icerik = [satir];
   if (e.url && e.gorsel && e.var !== false) icerik.push(h('img', { class: 'preview-img', src: e.url, alt: e.ad }));
   else if (e.url && e.var !== false) icerik.push(h('p', { class: 'modal-text' }, h('a', { href: e.url, target: '_blank', rel: 'noopener', text: 'Dosyayı yeni sekmede aç' })));

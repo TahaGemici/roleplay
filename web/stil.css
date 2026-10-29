@@ -1818,17 +1818,6 @@ input[type="checkbox"] {
 .entry.private .text {
   color: var(--bone);
 }
-.entry.secret {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--bone-dim);
-  font-size: 14px;
-}
-.entry.secret .die {
-  width: 22px;
-  height: 22px;
-}
 
 /* Zar sonucu kartı */
 .entry.roll {

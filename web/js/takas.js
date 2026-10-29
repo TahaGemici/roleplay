@@ -63,7 +63,7 @@ export function takasOlustur({ gonder }) {
     if (takas.kendim.para > 0) sec.append(h('option', { value: 'para', text: `Para (${paraYaz(takas.kendim.para)})` }));
     gruplar.forEach((g, n) => {
       const e = g.esya;
-      sec.append(h('option', { value: `e${n}`, text: `${e.ad}${g.adet > 1 ? ` ×${g.adet}` : ''}${e.dayaniklilik !== undefined ? ` · day. ${sayiYaz(e.dayaniklilik)}` : ''}` }));
+      sec.append(h('option', { value: `e${n}`, text: `${e.ad}${g.adet > 1 ? ` ×${g.adet}` : ''} · day. ${sayiYaz(e.dayaniklilik)}` }));
     });
     const ek = h('div', { class: 'trade-extra' });
     if (yuva?.tur === 'para') {
@@ -97,7 +97,7 @@ export function takasOlustur({ gonder }) {
   function onunYuva(yuva) {
     if (!yuva) return h('li', { class: 'trade-slot is-empty', text: '—' });
     if (yuva.tur === 'para') return h('li', { class: 'trade-slot is-coin' }, h('span', { class: 'coin-icon', 'aria-hidden': 'true', text: '◉' }), h('span', { text: paraYaz(yuva.para) }));
-    return h('li', { class: 'trade-slot' }, esyaKarti(yuva.esya, { adet: yuva.adet }), yuva.esya.dayaniklilik !== undefined ? h('span', { class: 'hint', text: `dayanıklılık ${sayiYaz(yuva.esya.dayaniklilik)}` }) : null);
+    return h('li', { class: 'trade-slot' }, esyaKarti(yuva.esya, { adet: yuva.adet }), h('span', { class: 'hint', text: `dayanıklılık ${sayiYaz(yuva.esya.dayaniklilik)}` }));
   }
 
   function ciz() {

@@ -32,7 +32,7 @@ sudo apt install -y systemd-container curl
 curl -fsSL https://github.com/TahaGemici/roleplay/releases/latest/download/kur.sh | sudo sh
 ```
 
-İlk seferde `/var/lib/roleplay/.env` oluşur ve kurulum durur. `GM_SIFRESI`, `OYUN_SIFRESI` ve `ALAN_ADI` değerlerini yazıp komutu tekrar çalıştır:
+Komut her çalıştığında oyun klasörü (`/var/lib/roleplay/oyun`) silinir ve yeni sürüm boş bir oyunla başlar; `.env` kalır. İlk seferde `/var/lib/roleplay/.env` oluşur ve kurulum durur. `GM_SIFRESI`, `OYUN_SIFRESI` ve `ALAN_ADI` değerlerini yazıp komutu tekrar çalıştır:
 
 ```bash
 sudo nano /var/lib/roleplay/.env
@@ -54,11 +54,10 @@ nginx kullanıyorsan `kurulum/nginx.conf`'a bak.
 
 | İş | Komut |
 | --- | --- |
-| Güncelle | kurulum komutunun aynısı |
-| Eski bir sürüme dön | kurulum komutunun sonuna `-s v41` ekle |
+| Güncelle (oyun silinir) | kurulum komutunun aynısı |
+| Eski bir sürüme dön (oyun silinir) | kurulum komutunun sonuna `-s v41` ekle |
 | Günlük | `journalctl -u systemd-nspawn@roleplay -f` |
-| `.env` değişince | `sudo systemctl restart systemd-nspawn@roleplay` |
-| Yedek al | `sudo tar -czf oyun-yedek.tgz -C /var/lib/roleplay oyun` |
+| `.env` değişince (oyun kalır) | `sudo systemctl restart systemd-nspawn@roleplay` |
 
 Depo özelse sürümler herkese açık olmaz. Bu durumda sunucuda `gh auth login` ile giriş yapıp şunu çalıştır:
 
@@ -96,7 +95,7 @@ void her_tur(Oyuncu *o)
 
 int hareket(Oyuncu *o, float x, float y)
 {
-    float yuk = o->agirlik - o->kendi_agirligi;                /* taşıdığı eşyaların ağırlığı */
+    float yuk = o->agirlik - KARAKTER_AGIRLIGI;                 /* taşıdığı eşyaların ağırlığı */
     float bedel = hypotf(x - o->x, y - o->y) + yuk / 10;        /* yük yürümeyi zorlaştırır */
     if (bedel > o->enerji) {
         bildir(o, "Enerjin yetmiyor.");
@@ -132,7 +131,7 @@ void buyu(Oyuncu *yapan, Oyuncu *hedef, const char *buyu_adi)
 
 **Kullanabileceklerin** (`sunucu/kurallar.h`):
 
-- Karakter: `ad`, `x`, `y`, `can`, `odak`, `zirh`, `buyu_direnci`, `enerji`, `kendi_agirligi` (eşyasız, yeni karakterde 70), `agirlik` (kendi ağırlığı + eşyaları, salt okunur), `para`, `envanter[]` / `envanter_adet`, `npc`
+- Karakter: `ad`, `x`, `y`, `can`, `odak`, `zirh`, `buyu_direnci`, `enerji`, `agirlik` (70 + eşyalarının ağırlığı, salt okunur; 70 = `KARAKTER_AGIRLIGI`), `para`, `envanter[]` / `envanter_adet`, `npc`
 - Eşya: `ad`, `sinif`, `resim`, `agirlik`, `dayaniklilik` (yeni eşyada 100), `sabit` (yumrukta 1)
 - Para bakır cinsindendir: `o->para += 2 * ALTIN + 5 * GUMUS;` (1 altın = 50 gümüş = 200 bakır)
 - Dayanıklılığa sunucu hiç dokunmaz: azaltmak, 0'a inince eşyayı kırmak (`envanter_cikar`) senin işin.
@@ -153,7 +152,7 @@ Fonksiyonlar hızlı bitmeli; çalışırken sunucu bekler. Değişiklikten sonr
 - Eşyaları katalogdan haritaya sürükler. Bir karakterin üstüne bırakılan eşya onun envanterine gider; boş yere bırakılan yerde durur.
 - NPC'leri yönetir: statlarını, parasını, envanterini düzenler; bir NPC adına oyuncuyla takas yapar ("Takas…").
 - Tur sırasını kurar, "Turları başlat"a basar; yürüme, saldırı ve büyü isteklerini onaylar ya da reddeder.
-- Karakterlerin statlarını, kendi ağırlıklarını, paralarını, eşyalarının ağırlığını ve dayanıklılığını, görünümünü (resim ve şapka) ve oyun klasöründeki dosyaları GM ekranından yönetir.
+- Karakterlerin statlarını, paralarını, eşyalarının ağırlığını ve dayanıklılığını, görünümünü (resim ve şapka) ve oyun klasöründeki dosyaları GM ekranından yönetir.
 - Görüş menzilini Ayarlar'dan herkes için tek bir değer olarak belirler. Yeni bir maç için "Maçı sıfırla"ya basar.
 
 **Oyuncu:**
@@ -165,31 +164,22 @@ Fonksiyonlar hızlı bitmeli; çalışırken sunucu bekler. Değişiklikten sonr
 - Envanterdeki bir eşyayı yere bırakabilir ya da yok edebilir; yumruk bırakılamaz ve yok edilemez.
 - Gördüğü bir eşyayı görüşünden çıkınca da hatırlar: biri onu alsa bile, gidip yeniden bakana kadar eşya orada görünür.
 - Pulunun resmini ve şapkasını "Görünüm" düğmesinden kendisi seçer.
-- Ağırlığı (kendi ağırlığı ve eşyaları) arttıkça haritadaki pulu büyür.
+- Ağırlığı (70 + eşyalarının ağırlığı) arttıkça haritadaki pulu büyür: 70'te 1 kat, 140'ta 2 kat.
 - Zar tepsisi `d20`, `2d6+3`, `4d6kh3` gibi ifadeleri anlar.
 
-## Oyunun verisi ve güncellemeler
+## Oyunun verisi
 
 Oyunun bütün verisi `oyun/` klasöründedir (sunucuda `/var/lib/roleplay/oyun`):
 
 - `durum.json`: karakterler, statlar, paralar, envanterler, konumlar ve haritaları, keşfedilen yerler, hatırlanan eşyalar, yerdeki eşyalar, portallar, tur sırası, kayıt, ayarlar
 - `haritalar/`, `esyalar/`, `tokenlar/` (pul resimleri), `sapkalar/`
 
-Güncellemeden sonra hiçbir şeyi silmen gerekmez: yeni sürüm eski `durum.json`'u okur, eksik alanları tamamlar. Yeni bir maça başlamak için GM ekranındaki **Maçı sıfırla** düğmesini kullan. Bu düğme `durum.json`'daki maç bilgilerini siler; oyuncular, ayarlar, haritalar ve portallar kalır. Önceki hali `durum-sifirlamadan-once.json` olarak saklanır.
+Kurulum komutu (güncelleme ve eski sürüme dönüş de) her çalıştığında bu klasörü siler: yeni sürüm eski sürümün kaydını okumaz, boş bir oyunla başlar. `.env` (şifreler ve alan adı) silinmez. Haritaların ve resimlerin aslını kendi bilgisayarında sakla; güncellemeden sonra GM ekranındaki **Dosyalar**'dan yeniden yüklersin. Kendi bilgisayarında çalıştırırken `oyun/` silinmez; sunucu başka bir sürümün `durum.json`'unu okumaz, kenara alıp yeni bir oyunla başlar.
 
-**Temiz kurulum** (her şey sıfırdan: oyuncular, ayarlar, haritalar, eşyalar, portallar, kayıt) için servisi durdurup oyun klasörünü sil, sonra yeniden başlat. `.env` (şifreler ve alan adı) kalır:
-
-```bash
-sudo systemctl stop systemd-nspawn@roleplay
-sudo rm -rf /var/lib/roleplay/oyun
-sudo systemctl start systemd-nspawn@roleplay
-```
-
-Haritaları, eşya ve pul resimlerini tutup yalnızca oyunu sıfırlamak istersen `oyun` klasörü yerine `/var/lib/roleplay/oyun/durum.json` dosyasını sil. Servis çalışırken silme; kapanırken dosyayı yeniden yazar. Şifreleri de sıfırlamak için `/var/lib/roleplay/.env`'yi silip kurulum komutunu yeniden çalıştır.
+Aynı sürümde yeni bir maça başlamak için GM ekranındaki **Maçı sıfırla** düğmesini kullan: maç bilgileri silinir; oyuncular, ayarlar, haritalar ve portallar kalır. Önceki hali `durum-sifirlamadan-once.json` olarak saklanır.
 
 ## Sınırlar
 
 - Bir sunucu tek bir oyun çalıştırır.
 - Harita bir resimdir, duvarları bilmez: görüş duvarlardan geçer. Engelleri GM yönetir.
 - Sesler tarayıcıda üretilir; tarayıcı ilk tıklamadan önce ses çalmaz.
-- Yedek için `oyun/` klasörünü kopyalamak yeter.

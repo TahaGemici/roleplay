@@ -554,8 +554,8 @@ export function gmPaneliOlustur({ gonder, harita, gorunumAc }) {
       alanlar: [
         { ad: 'ad', etiket: 'Ad', deger: e.ad, azami: 60 },
         { ad: 'sinif', etiket: 'Sınıf', deger: e.sinif, azami: 31, oneriler: durum.siniflar },
-        { ad: 'agirlik', etiket: 'Ağırlık', tur: 'sayi', deger: e.agirlik ?? 1, en: 0, ust: 1000000 },
-        { ad: 'dayaniklilik', etiket: 'Dayanıklılık (hesabını kurallar.c yapar)', tur: 'sayi', deger: e.dayaniklilik ?? 100 },
+        { ad: 'agirlik', etiket: 'Ağırlık', tur: 'sayi', deger: e.agirlik, en: 0, ust: 1000000 },
+        { ad: 'dayaniklilik', etiket: 'Dayanıklılık (hesabını kurallar.c yapar)', tur: 'sayi', deger: e.dayaniklilik },
       ],
       dugme: 'Kaydet',
     });

@@ -11,7 +11,8 @@
 #   /var/lib/machines/roleplay.raw            imaj (salt okunur)
 #   /etc/systemd/nspawn/roleplay.nspawn       konteyner ayarları (imajın içinden)
 #   /etc/systemd/system/systemd-nspawn@roleplay.service.d/roleplay.conf  servis ayarı (imajın içinden)
-#   /var/lib/roleplay/                        .env ve oyun/ (konteynerde /veri); içeriğine dokunulmaz
+#   /var/lib/roleplay/                        .env ve oyun/ (konteynerde /veri). .env'e dokunulmaz; oyun/ her
+#                                             kurulumda silinir, yeni sürüm boş bir oyunla başlar.
 set -eu
 
 # GitHub deposu (kullanici/roleplay). Sürümlerdeki kur.sh'ye imaj-olustur.sh yazar.
@@ -74,7 +75,15 @@ main() {
 	install -D -m 0644 "$GECICI/kurulum/$AD.nspawn" "/etc/systemd/nspawn/$AD.nspawn"
 	install -D -m 0644 "$GECICI/kurulum/servis.conf" "/etc/systemd/system/$SERVIS.d/$AD.conf"
 
-	# 3) Veri klasörü konteynerin root'una, yani sunucudaki ayrıcalıksız UID'ye (PrivateUsers=) aittir
+	# 3) Eski oyun silinir (eski sürümün kaydı yeni sürüme taşınmaz); .env kalır. Önce durdur: çalışan sunucu
+	#    kapanırken oyunu yeniden yazar.
+	systemctl stop "$SERVIS" 2>/dev/null || true
+	if [ -d "$VERI/oyun" ]; then
+		rm -rf "$VERI/oyun"
+		echo "Eski oyun silindi ($VERI/oyun); yeni sürüm boş bir oyunla başlar. .env yerinde."
+	fi
+
+	# 4) Veri klasörü konteynerin root'una, yani sunucudaki ayrıcalıksız UID'ye (PrivateUsers=) aittir
 	KULLANICI=$(sed -n 's/^PrivateUsers=\([0-9][0-9]*\)$/\1/p' "/etc/systemd/nspawn/$AD.nspawn")
 	mkdir -p "$VERI"
 	if [ ! -f "$VERI/.env" ]; then
@@ -85,7 +94,7 @@ main() {
 	chmod 0600 "$VERI/.env"
 	chown -R "$KULLANICI:$KULLANICI" "$VERI" # elle konan dosyalar da konteynerin olsun
 
-	# 4) Yerine koy ve başlat
+	# 5) Yerine koy ve başlat
 	chmod 0444 "$GECICI/imaj"
 	mv -f "$GECICI/imaj" "$IMAJ"
 	systemctl daemon-reload
@@ -129,7 +138,7 @@ EOF
 Roleplay $SURUM konteynerde çalışıyor; sunucu açılınca kendiliğinden başlar.
   Günlük     journalctl -u $SERVIS -f
   Ayarlar    sudo nano $VERI/.env   sonra   sudo systemctl restart $SERVIS
-  Güncelle   $GUNCELLE
+  Güncelle   $GUNCELLE   (oyun klasörü silinir, .env kalır)
 EOF
 }
 

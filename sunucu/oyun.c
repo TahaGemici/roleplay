@@ -47,7 +47,6 @@ int tur_sayisi;
 #define AZAMI_GORUS 1000.0
 #define VARSAYILAN_GORUS 6.0f
 #define VARSAYILAN_CAN 10.0f
-#define VARSAYILAN_AGIRLIK 70.0f /* karakterin kendi ağırlığı; pul bu ağırlıkta 1 kat */
 #define VARSAYILAN_DAYANIKLILIK 100.0f
 #define ALMA_MESAFESI 0.5    /* yürüyüşü yerdeki eşyanın bu kadar kare yakınından geçen onu alır */
 #define PORTAL_MESAFESI 0.5  /* yürüyüşü portala bu kadar kare yakın biten portaldan geçer */
@@ -224,7 +223,6 @@ static const StatAlani STATLAR[] = {
     STAT_ALANI(zirh, "zırh", -AZAMI_STAT, AZAMI_STAT),
     STAT_ALANI(buyu_direnci, "büyü direnci", -AZAMI_STAT, AZAMI_STAT),
     STAT_ALANI(enerji, "enerji", -AZAMI_STAT, AZAMI_STAT),
-    STAT_ALANI(kendi_agirligi, "kendi ağırlığı", 0, AZAMI_STAT),
 };
 
 static float *stat_yeri(Oyuncu *o, const StatAlani *a)
@@ -553,7 +551,6 @@ static Karakter *karakter_olustur(int npc, const char *id, const char *ad, const
     k->o.npc = npc;
     k->o.can = VARSAYILAN_CAN;
     k->o.enerji = O.ayar.tur_enerjisi;
-    k->o.kendi_agirligi = VARSAYILAN_AGIRLIK;
     yumruk_ver(&k->o);
     agirlik_hesapla(&k->o);
     O.kar = xrealloc(O.kar, (size_t)(O.kar_n + 1) * sizeof *O.kar);
@@ -650,10 +647,10 @@ static void yumruk_ver(Oyuncu *o)
     }
 }
 
-/* Toplam ağırlık: karakterin kendi ağırlığı ve eşyalarının ağırlıkları */
+/* Ağırlık: KARAKTER_AGIRLIGI ve eşyalarının ağırlıkları */
 static void agirlik_hesapla(Oyuncu *o)
 {
-    double t = sinirla_d(o->kendi_agirligi, 0, AZAMI_STAT);
+    double t = KARAKTER_AGIRLIGI;
     for (int i = 0; i < o->envanter_adet && i < ENVANTER_AZAMI; i++) t += o->envanter[i].agirlik;
     o->agirlik = (float)sinirla_d(t, 0, AZAMI_STAT);
 }
@@ -1870,7 +1867,7 @@ static void statlar_yaz(Buf *b, const Oyuncu *o)
 /* Pul ağırlıkla büyür: 70 ağırlıkta 1 kat; ağırlık iki katına çıkınca iki kat (0.6 ile 2.2 kat arasında) */
 static double token_olcegi(const Karakter *k)
 {
-    return fmin(fmax(k->o.agirlik / VARSAYILAN_AGIRLIK, 0.6), 2.2);
+    return fmin(fmax(k->o.agirlik / KARAKTER_AGIRLIGI, 0.6), 2.2);
 }
 
 /* Tokenın görünümü: ,"resim":url|null,"sapka":url|null,"olcek":1.2 */
@@ -2080,10 +2077,10 @@ static void durum_yaz_gm(Buf *b)
         buf_puts(b, ",\"ad\":");
         buf_json_str(b, k->ad);
         buf_printf(b,
-                   ",\"renk\":\"%s\",\"npc\":%s,\"gizli\":%s,\"olu\":%s,\"cevrimici\":%s,\"sirada\":%s,\"yerde\":%s,"
+                   ",\"renk\":\"%s\",\"npc\":%s,\"gizli\":%s,\"olu\":%s,\"cevrimici\":%s,\"sirada\":%s,"
                    "\"burada\":%s,\"para\":%d,\"harita\":",
                    k->renk, k->npc ? "true" : "false", k->gizli ? "true" : "false", k->olu ? "true" : "false",
-                   k->baglanti > 0 ? "true" : "false", sirada_mi(k->id) ? "true" : "false", haritada(k) ? "true" : "false",
+                   k->baglanti > 0 ? "true" : "false", sirada_mi(k->id) ? "true" : "false",
                    gm_haritasinda(k) ? "true" : "false", k->o.para);
         if (k->harita) buf_json_str(b, k->harita);
         else buf_puts(b, "null");
@@ -4655,7 +4652,6 @@ static void m_mac_sifirla(void)
         o->can = VARSAYILAN_CAN;
         o->odak = o->zirh = o->buyu_direnci = 0;
         o->enerji = O.ayar.tur_enerjisi;
-        o->kendi_agirligi = VARSAYILAN_AGIRLIK;
         o->para = 0;
         o->envanter_adet = 0;
         yumruk_ver(o);
@@ -4934,9 +4930,9 @@ void dosyalar_degisti(void)
 
 /* ================================================================== kalıcılık (durum.json) */
 
-/* durum.json biçimi: 2 = yerleşik yumruk, eşya ağırlıkları, yerdeki eşyalar, genel görüş;
-   3 = her karakterin kendi haritası, para, dayanıklılık, kendi ağırlığı, portallar, eşya hafızası */
-#define DURUM_SURUMU 3
+/* durum.json biçiminin sürümü. Başka bir sürümün kaydı okunmaz (kenara alınır, yeni oyun başlar); kurulum zaten
+   her seferinde oyun klasörünü siler. Biçim değişince artır. */
+#define DURUM_SURUMU 4
 
 /* {"ad":..,"sinif":..,"resim":..,"agirlik":..,"dayaniklilik":..} */
 static void esya_kaydi_yaz(Buf *b, const Esya *e)
@@ -5086,16 +5082,12 @@ static int esya_yukle(const Json *o, Esya *e)
     return 1;
 }
 
-/* Eski kayıtlarda (surum < 2) GM'in elle verdiği yumruklar yerleşik yumruğa dönüşür. */
-static void envanter_yukle(Karakter *k, const Json *env, int surum)
+/* Kayıttaki envanter (yumruk kaydedilmez, karakter_olustur verir) */
+static void envanter_yukle(Karakter *k, const Json *env)
 {
-    Esya y;
-    yumruk_kopyasi(&y);
     for (size_t i = 0; env && env->tur == JSON_ARR && i < env->adet; i++) {
         Esya e;
-        if (!esya_yukle(env->ogeler[i], &e)) continue;
-        if (surum < 2 && !strcmp(e.ad, y.ad) && !strcmp(e.sinif, y.sinif)) continue;
-        envantere_koy(k, &e);
+        if (esya_yukle(env->ogeler[i], &e)) envantere_koy(k, &e);
     }
 }
 
@@ -5129,12 +5121,9 @@ static void durum_yukle(const Json *d)
     if ((s = json_metin(a, "sifre"))) kopyala(O.ayar.sifre, sizeof O.ayar.sifre, s);
     O.ayar.tur_enerjisi = json_float(a, "tur_enerjisi", 10, 0, 100000);
     O.ayar.gorus = json_float(a, "gorus", VARSAYILAN_GORUS, 0, AZAMI_GORUS);
-    int surum = json_tamsayi(d, "surum", &v) ? (int)v : 1;
     if ((s = json_metin(a, "gm_tuz")) && strlen(s) == 32) kopyala(O.ayar.gm_tuz, sizeof O.ayar.gm_tuz, s);
     if ((s = json_metin(a, "gm_iz")) && strlen(s) == 40) kopyala(O.ayar.gm_iz, sizeof O.ayar.gm_iz, s);
     if (json_tamsayi(d, "sayac", &v)) O.sayac = v;
-    /* surum < 3: tek bir açık harita vardı; oyuncular orada (konum kaydı olanlar) */
-    const char *eski_aktif = json_metin(d, "aktif_harita");
 
     const Json *kl = json_al(d, "karakterler");
     for (size_t i = 0; kl && kl->tur == JSON_ARR && i < kl->adet; i++) {
@@ -5148,7 +5137,7 @@ static void durum_yukle(const Json *d)
         if (npc && !hd_gecerli) continue;
         Karakter *k = karakter_olustur(npc, id, temiz, renk_gecerli(renk) ? renk : npc ? NPC_RENK[0] : OYUNCU_RENK[0]);
         if (!k) break;
-        if (hd_gecerli && (npc || surum >= 3)) k->harita = xstrdup(hd);
+        if (hd_gecerli) k->harita = xstrdup(hd);
         k->o.para = (int)sinirla_d(round(json_sayi(o, "para", 0)), 0, AZAMI_PARA);
         k->gizli = npc && json_mantik(o, "gizli", 0);
         k->olu = json_mantik(o, "olu", 0);
@@ -5160,7 +5149,7 @@ static void durum_yukle(const Json *d)
             float *v = stat_yeri(&k->o, &STATLAR[s]);
             *v = json_float(o, STATLAR[s].ad, *v, STATLAR[s].lo, STATLAR[s].hi);
         }
-        envanter_yukle(k, json_al(o, "envanter"), surum);
+        envanter_yukle(k, json_al(o, "envanter"));
     }
 
     const Json *ot = json_al(d, "oturumlar");
@@ -5185,19 +5174,6 @@ static void durum_yukle(const Json *d)
         HaritaKaydi *h = harita_bul(dosya, 1);
         izgara_yukle(h, json_al(o, "izgara"));
         h->gizli = json_mantik(o, "gizli", 0);
-        int eskiden_aktif = surum < 3 && eski_aktif && !strcmp(eski_aktif, dosya);
-        if (eskiden_aktif) {
-            h->gizli = json_mantik(d, "harita_gizli", 0);
-            /* Eski açık haritada yeri kayıtlı oyuncular bu haritada kalır; öteki haritalardaki yerleri unutulur */
-            const Json *konl = json_al(o, "konum");
-            for (size_t k = 0; konl && konl->tur == JSON_ARR && k < konl->adet; k++) {
-                Karakter *kr = karakter_bul(json_metin(konl->ogeler[k], "oyuncu"));
-                if (!kr || kr->npc || kr->harita) continue;
-                kr->harita = xstrdup(h->dosya);
-                kr->o.x = json_float(konl->ogeler[k], "x", 0, 0, AZAMI_STAT);
-                kr->o.y = json_float(konl->ogeler[k], "y", 0, 0, AZAMI_STAT);
-            }
-        }
         const Json *bil = json_al(o, "bilgi");
         for (size_t k = 0; bil && bil->tur == JSON_ARR && k < bil->adet; k++) {
             const Json *bo = bil->ogeler[k];
@@ -5294,7 +5270,8 @@ static void durum_yukle(const Json *d)
         }
         i++;
     }
-    if (eski_aktif && harita_bul(eski_aktif, 0)) O.aktif = xstrdup(eski_aktif);
+    const char *aktif = json_metin(d, "aktif_harita"); /* GM'in baktığı harita */
+    if (aktif && harita_bul(aktif, 0)) O.aktif = xstrdup(aktif);
 
     const Json *sr = json_al(d, "sira");
     const Json *liste = json_al(sr, "liste");
@@ -5430,13 +5407,15 @@ void oyun_baslat(void)
         while ((k = fread(tmp, 1, sizeof tmp, f)) > 0) buf_add(&b, tmp, k);
         fclose(f);
         Json *d = b.len ? json_ayristir(b.p, b.len) : NULL;
-        if (d && d->tur == JSON_OBJ) {
+        long long surum = 0;
+        if (d && d->tur == JSON_OBJ && json_tamsayi(d, "surum", &surum) && surum == DURUM_SURUMU) {
             durum_yukle(d);
-        } else { /* üzerine yazılmasın: elle düzeltilebilir */
+        } else { /* bozuk ya da başka bir sürümün kaydı: üzerine yazılmasın, kenara alınsın */
             char yedek[YOL_AZAMI + 64];
-            snprintf(yedek, sizeof yedek, "%s/durum-bozuk-%lld.json", yap.oyun_klasoru, simdi_sn());
+            snprintf(yedek, sizeof yedek, "%s/durum-okunmayan-%lld.json", yap.oyun_klasoru, simdi_sn());
             rename(yol, yedek);
-            fprintf(stderr, "durum.json okunamadı; %s olarak saklandı, yeni bir oyunla başlanıyor.\n", yedek);
+            fprintf(stderr, "durum.json %s; %s olarak saklandı, yeni bir oyunla başlanıyor.\n",
+                    d && d->tur == JSON_OBJ ? "başka bir sürümün kaydı" : "okunamadı", yedek);
         }
         json_sil(d);
         buf_free(&b);

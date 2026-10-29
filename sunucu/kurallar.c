@@ -16,8 +16,7 @@
  *   o->x, o->y                  konumu, kare biriminde (değiştirirsen taşınır)
  *   o->can, o->odak, o->zirh, o->buyu_direnci
  *   o->enerji                   aksiyon puanı; 0 olunca sıra geçer (ne kadar harcanacağını sen yazarsın)
- *   o->kendi_agirligi           karakterin kendi ağırlığı (eşyasız)
- *   o->agirlik                  toplam ağırlık: kendi ağırlığı + eşyaları (salt okunur)
+ *   o->agirlik                  ağırlığı: KARAKTER_AGIRLIGI (70) + eşyalarının ağırlıkları (salt okunur)
  *   o->para                     parası, bakır cinsinden (1 ALTIN = 50 GUMUS = 200 BAKIR)
  *   o->envanter[i]              eşyalar: .ad, .sinif, .resim, .agirlik, .dayaniklilik  (i < o->envanter_adet;
  *                               envanter[0] her zaman yumruk, en fazla ENVANTER_AZAMI eşya)

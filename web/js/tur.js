@@ -160,14 +160,13 @@ export function turKartiOlustur(kok, { gonder }) {
   };
 }
 
-/* GM'in düzenleyebildiği statlar. Ağırlık (yük) envanterden gelir; yalnızca gösterilir. */
+/* GM'in düzenleyebildiği statlar. Ağırlık (70 + eşyalar) sunucudan gelir; yalnızca gösterilir. */
 const STATLAR = [
   ['can', 'Can'],
   ['odak', 'Odak'],
   ['zirh', 'Zırh'],
   ['buyu_direnci', 'Büyü direnci'],
   ['enerji', 'Enerji'],
-  ['kendi_agirligi', 'Kendi ağırlığı'],
 ];
 
 /** Oyuncunun kendi statları (başkalarınınkini yalnızca GM görür). */
@@ -185,9 +184,7 @@ export function durumKartiCiz(kok, durum) {
     h(
       'dl',
       { class: 'stats' },
-      ...[...STATLAR.filter(([k]) => k !== 'kendi_agirligi'), ['agirlik', 'Ağırlık']].map(([k, ad]) =>
-        h('div', { class: `stat stat-${k}`, title: k === 'agirlik' ? `Kendi ağırlığın ${sayiYaz(st.kendi_agirligi)}, eşyaların ${sayiYaz(st.agirlik - st.kendi_agirligi)}` : null }, h('dt', { text: ad }), h('dd', { text: sayiYaz(st[k]) })),
-      ),
+      ...[...STATLAR, ['agirlik', 'Ağırlık']].map(([k, ad]) => h('div', { class: `stat stat-${k}` }, h('dt', { text: ad }), h('dd', { text: sayiYaz(st[k]) }))),
       h('div', { class: 'stat stat-para' }, h('dt', { text: 'Para' }), h('dd', { text: paraYaz(durum.ben.para) })),
     ),
   );

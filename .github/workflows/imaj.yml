@@ -93,6 +93,15 @@ jobs:
           grep -q 'Kapanıyor, oyun kaydediliyor' gunluk.log
           sudo test -s /var/lib/roleplay/oyun/durum.json
 
+      - name: Yeniden kurulumda oyun silinir, .env kalır
+        run: |
+          sudo touch /var/lib/roleplay/oyun/haritalar/eski.png
+          sudo sh cikti/kur.sh cikti/roleplay.raw | tee kur2.log
+          grep -q 'Eski oyun silindi' kur2.log
+          if sudo test -e /var/lib/roleplay/oyun/haritalar/eski.png; then echo "oyun klasörü silinmedi"; exit 1; fi
+          sudo grep -q '^GM_SIFRESI=ci-gm-sifresi-123' /var/lib/roleplay/.env
+          curl -fsS http://127.0.0.1:3000/saglik && echo
+
   yayinla:
     name: Sürümü yayınla
     needs: dene

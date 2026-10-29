@@ -16,9 +16,11 @@
 #ifndef KURALLAR_H
 #define KURALLAR_H
 
-/* Bir envanterde en fazla bu kadar eşya olabilir (yumruk dahil). İstersen değiştir ve yeniden derle;
-   azaltırsan kayıtlı oyunda fazla gelen eşyalar düşer. */
+/* Bir envanterde en fazla bu kadar eşya olabilir (yumruk dahil). İstersen değiştir ve yeniden derle. */
 #define ENVANTER_AZAMI 12
+
+/* Eşyasız bir karakterin ağırlığı: o->agirlik = KARAKTER_AGIRLIGI + eşyalarının ağırlıkları */
+#define KARAKTER_AGIRLIGI 70
 
 /* Para bakır cinsinden tutulur: o->para += 3 * ALTIN + 10 * GUMUS; */
 #define BAKIR 1
@@ -53,8 +55,7 @@ typedef struct {
     float buyu_direnci;
     float enerji;       /* aksiyon puanı. Ne kadar harcanacağını hareket(), saldiri() ve buyu() içinde sen
                            belirlersin; 0 ya da altına inince sıra geçer. */
-    float kendi_agirligi; /* karakterin kendi ağırlığı (eşyasız). Yeni karakterde 70; GM ve sen değiştirebilirsiniz. */
-    float agirlik;      /* toplam ağırlık: kendi_agirligi + eşyalarının ağırlıkları. Sunucu hesaplar (salt okunur);
+    float agirlik;      /* ağırlığı: KARAKTER_AGIRLIGI (70) + eşyalarının ağırlıkları. Sunucu hesaplar (salt okunur);
                            arttıkça haritadaki pulu büyür (70'te 1 kat, 140'ta 2 kat). */
     int para;           /* parası, bakır cinsinden: 1 altın = 50 gümüş = 200 bakır (ALTIN, GUMUS, BAKIR) */
 

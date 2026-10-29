@@ -113,13 +113,6 @@ export function kayitOlustur(liste) {
     switch (g.tur) {
       case 'zar':
         return zarKarti(g, canli);
-      case 'gizli_zar': /* eski kayıtlar: gizli atış artık yok */
-        return h(
-          'li',
-          { class: 'entry secret', vars: { '--c': g.renk } },
-          zarSimgesi(20, '?'),
-          h('span', {}, h('span', { class: 'who', text: g.kim }), ' gizli bir zar attı.'),
-        );
       case 'sira':
         return satir(g, 'turn');
       case 'kural':
