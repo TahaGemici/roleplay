@@ -46,9 +46,9 @@
  * Sınıf adı bir klasör adıdır: / içeremez, nokta ile başlayamaz, en fazla 31 bayt olabilir.
  */
 const char *const esya_siniflari[] = {
-    /* "silah", */
-    /* "zirh",  */
-    /* "iksir", */
+    "silah",
+    "zirh",
+    "iksir",
     NULL
 };
 
@@ -56,24 +56,7 @@ const char *const esya_siniflari[] = {
 
 void her_tur(Oyuncu *o)
 {
-    (void)o; /* kullanmaya başlayınca bu satırı silebilirsin */
-
-    /* --- Örnekler: denemek için yorum işaretlerini kaldır ---
-
-    // Enerjiyi odağa göre ver: 5 + odak/2
-    o->enerji = 5 + o->odak / 2;
-
-    // Haritanın sol üst köşesindeki 3x3'lük alan radyasyonlu olsun
-    if (o->x < 3 && o->y < 3) {
-        int hasar = zar("1d4");
-        o->can -= hasar;
-        duyur("%s radyasyona maruz kaldı: %d hasar.", o->ad, hasar);
-    }
-
-    // Gizli bir algı kontrolü: sonucu yalnızca o oyuncu ve GM görür
-    if (!o->npc && zar("1d20") >= 15) bildir(o, "Duvarda bir çatlak fark ettin.");
-
-    */
+    o->enerji = 10;
 }
 
 /* ------------------------------------------------------------------ GM bir yürüyüşü onaylayınca
@@ -90,32 +73,15 @@ void her_tur(Oyuncu *o)
  */
 int hareket(Oyuncu *o, float x, float y)
 {
-    /* ÖRNEK KURAL: istediğin gibi değiştir */
-
     float mesafe = hypotf(x - o->x, y - o->y);  /* düz çizgi uzunluğu, kare cinsinden */
-    float bedel = mesafe;                       /* kare başına 1 enerji */
-
-    /* --- Başka örnekler: denemek için yorum işaretlerini kaldır ---
-
-    // Zırh ağırsa her kare daha pahalı
-    bedel = mesafe * (1 + o->zirh / 10);
-
-    // Enerji yetmiyorsa yetebildiği kadar yürüsün (yolu kısalt)
-    if (bedel > o->enerji) {
-        if (o->enerji <= 0) return 0;
-        float oran = o->enerji / bedel;
-        o->x += (x - o->x) * oran;
-        o->y += (y - o->y) * oran;
-        o->enerji = 0;
-        return 1;
-    }
-
-    */
+    float bedel = (mesafe > 4.0) ? (mesafe - 4.0) : 0.0;    /* kare başına 1 enerji */
 
     if (bedel > o->enerji) {
         bildir(o, "Enerjin yetmiyor: bu yol %.1f enerji ister, %.1f enerjin var.", bedel, o->enerji);
         return 0;                               /* yerinde kalır */
     }
+    
+    gm_bildir("HAREKET: %s (%.1f,%.1f) -> (%.1f,%.1f) tur %d enerji %.1f", o->ad, o->x, o->y, x, y, tur_sayisi, o->enerji);
     o->enerji -= bedel;
     return 1;
 }
@@ -126,28 +92,32 @@ void saldiri(Oyuncu *saldiran, Oyuncu *hedef, Esya *esya)
 {
     (void)saldiran; /* kullanmaya başlayınca bu üç satırı silebilirsin */
     (void)hedef;
-    (void)esya;
 
-    /* --- Örnek: denemek için yorum işaretlerini kaldır ---
-
-    // Saldırı 4 enerji harcar (enerji 0'a inerse sıra geçer)
-    saldiran->enerji -= 4;
-
-    // Hasar zarı eşyanın sınıfına göre
-    int hasar = strcmp(esya->sinif, "silah") == 0 ? zar("1d8") : zar("1d4");
-
-    // İsabet: 1d20 + odak, 10 + hedefin zırhını geçmeli
-    int atis = zar_at(1, 20) + (int)saldiran->odak;
-    if (atis > 10 + hedef->zirh) {
-        hedef->can -= hasar;
-        duyur("%s, %s ile vurdu; %s %d hasar aldı.", saldiran->ad, esya->ad, hedef->ad, hasar);
-    } else {
-        duyur("%s ıskaladı (%d).", saldiran->ad, atis);
+    if(strcmp(esya->sinif, "silah") != 0){
+        bildir(saldiran, "Bu bir silah değil!");
+        return;
     }
 
-    // Tek kullanımlık eşya: kullanınca envanterden çıkar. Bunu en sonda yap,
-    // çünkü çıkardıktan sonra esya göstericisi başka bir eşyayı gösterir.
-    if (strcmp(esya->sinif, "iksir") == 0) envanter_cikar(saldiran, (int)(esya - saldiran->envanter));
+    int miktar, bedel;
+    if(strstr(esya->ad,"Uzun") != NULL){
+        miktar = 20;
+        bedel = 2;
+    } else if(strstr(esya->ad,"Kısa") != NULL){
+        miktar = 12;
+        bedel = 1;
+    } else if(strstr(esya->ad,"Yumruk") != NULL){
+        miktar = 4;
+        bedel = 1;
+    } else{
+        bildir(saldiran, "Bilinmeyen eşya!");
+        return;
+    }
 
-    */
+    if(saldiran->enerji>bedel){
+        saldiran->enerji -= bedel;
+        hedef->can -= zar_at(1,miktar);
+        bildir(saldiran, "SALDIRI: %s -> %s [%s/%s] can %.0f", saldiran->ad, hedef->ad, esya->ad, esya->sinif, hedef->can);
+    } else{
+        bildir(saldiran, "Enerjin yetmiyor!");
+    }
 }
