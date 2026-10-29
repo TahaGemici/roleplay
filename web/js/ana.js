@@ -10,7 +10,7 @@ import { zarSimgesi } from './zar-sekilleri.js';
 const rol = location.pathname.replace(/\/+$/, '') === '/gm' ? 'gm' : 'oyuncu';
 const dar = window.matchMedia('(max-width: 900px)');
 
-let bilgi = { oyun_adi: 'Zar Masası', sifre_var: true };
+let bilgi = { oyun_adi: 'Roleplay', sifre_var: true };
 let ws = null;
 let durum = null;
 let cikildi = false;
@@ -53,7 +53,7 @@ function girisGoster(hata = '') {
   $('#giris-hata').textContent = hata;
   if (!gmMi) {
     try {
-      const son = localStorage.getItem('zarmasasi.ad');
+      const son = localStorage.getItem('roleplay.ad');
       if (son && !$('#giris-ad').value) $('#giris-ad').value = son;
     } catch {
       /* önemsiz */
@@ -85,7 +85,7 @@ $('#giris-formu').addEventListener('submit', async (e) => {
     } else {
       await istek('/api/giris', { yontem: 'POST', govde: { ad, sifre } });
       try {
-        localStorage.setItem('zarmasasi.ad', ad);
+        localStorage.setItem('roleplay.ad', ad);
       } catch {
         /* önemsiz */
       }

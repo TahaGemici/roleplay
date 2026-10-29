@@ -137,10 +137,10 @@ export function gmPaneliOlustur({ gonder, harita }) {
     $(id).addEventListener('change', (e) => gonder({ t: 'izgara', [alan]: e.target.checked }));
   }
   const halkalar = $('#halkalar');
-  halkalar.checked = depoOku('zarmasasi.halkalar', true);
+  halkalar.checked = depoOku('roleplay.halkalar', true);
   harita.halkalariGoster(halkalar.checked);
   halkalar.addEventListener('change', () => {
-    depoYaz('zarmasasi.halkalar', halkalar.checked);
+    depoYaz('roleplay.halkalar', halkalar.checked);
     harita.halkalariGoster(halkalar.checked);
   });
   $('#kesif-sifirla').addEventListener('click', async () => {

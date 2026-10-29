@@ -3548,7 +3548,7 @@ static void gm_sifre_izi(const char *tuz, const char *sifre, char out[41])
     unsigned char d[20];
     Buf b;
     buf_init(&b);
-    buf_printf(&b, "zar-masasi-gm:%s:%s", tuz, sifre);
+    buf_printf(&b, "roleplay-gm:%s:%s", tuz, sifre);
     sha1(b.p, b.len, d);
     buf_free(&b);
     unsigned char t[20 + 32];
@@ -3591,7 +3591,7 @@ void oyun_baslat(void)
     sinif_klasorlerini_ac();
 
     memset(&O, 0, sizeof O);
-    kopyala(O.ayar.oyun_adi, sizeof O.ayar.oyun_adi, "Zar Masası");
+    kopyala(O.ayar.oyun_adi, sizeof O.ayar.oyun_adi, "Roleplay");
     O.ayar.tur_enerjisi = 10;
     O.sira.indeks = -1;
     O.sira.tur_no = 1;

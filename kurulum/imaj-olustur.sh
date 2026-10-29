@@ -1,12 +1,12 @@
 #!/bin/sh
 # Bir sürümün dosyalarını üretir. GitHub Actions her main push'unda bunları Releases'a koyar.
-#   cikti/zar-masasi.raw   systemd-nspawn imajı
+#   cikti/roleplay.raw     systemd-nspawn imajı
 #   cikti/kur.sh           sunucuda kurar ve günceller (DEPO verildiyse o deponun sürümlerinden indirir)
 #   cikti/SHA256SUMS
 #
 # İmaj salt okunur tek bir squashfs dosya sistemidir: statik derlenmiş sunucu, web arayüzü ve konteyner
-# ayarları (zar-masasi.nspawn, servis.conf, .env.example). Kabuk ya da kütüphane yoktur; oyunun verisi
-# imajda değil, sunucudaki /var/lib/zar-masasi'dadır.
+# ayarları (roleplay.nspawn, servis.conf, .env.example). Kabuk ya da kütüphane yoktur; oyunun verisi
+# imajda değil, sunucudaki /var/lib/roleplay'dedir.
 #
 # Gerekenler: sudo apt install make musl-tools squashfs-tools
 # Kullanım:   make imaj   (root gerekmez)
@@ -35,24 +35,24 @@ fi
 KOK=$(mktemp -d)
 trap 'rm -rf "$KOK"' EXIT
 trap 'exit 1' INT TERM
-mkdir -p "$CIKTI" "$KOK/usr/bin" "$KOK/usr/lib" "$KOK/usr/share/zar-masasi/kurulum" "$KOK/etc" \
+mkdir -p "$CIKTI" "$KOK/usr/bin" "$KOK/usr/lib" "$KOK/usr/share/roleplay/kurulum" "$KOK/etc" \
 	"$KOK/proc" "$KOK/sys" "$KOK/dev" "$KOK/run" "$KOK/tmp" "$KOK/veri"
 
 # 1) Sunucu: musl ile statik (imajda kütüphane yok), adresleri her açılışta rastgele (static-pie), sembolsüz.
-make -s HEDEF="$KOK/usr/bin/zar-masasi" CC="$CC" \
+make -s HEDEF="$KOK/usr/bin/roleplay" CC="$CC" \
 	CFLAGS="-O2 -fPIE -fstack-protector-strong" LDFLAGS="-static-pie -s"
 
 # 2) Web arayüzü ve konteyner ayarları (kur.sh ayarları imajdan alıp sunucuya yazar)
-cp -R web "$KOK/usr/share/zar-masasi/web"
-cp kurulum/zar-masasi.nspawn kurulum/servis.conf "$KOK/usr/share/zar-masasi/kurulum/"
-cp .env.example "$KOK/usr/share/zar-masasi/kurulum/env.example"
+cp -R web "$KOK/usr/share/roleplay/web"
+cp kurulum/roleplay.nspawn kurulum/servis.conf "$KOK/usr/share/roleplay/kurulum/"
+cp .env.example "$KOK/usr/share/roleplay/kurulum/env.example"
 
 # 3) nspawn'ın beklediği iskelet. İmaj salt okunur olduğu için bağlama noktaları (/proc, /veri...) baştan var.
 cat >"$KOK/usr/lib/os-release" <<EOF
-NAME="Zar Masası"
-PRETTY_NAME="Zar Masası $SURUM"
-ID=zar-masasi
-IMAGE_ID=zar-masasi
+NAME="Roleplay"
+PRETTY_NAME="Roleplay $SURUM"
+ID=roleplay
+IMAGE_ID=roleplay
 IMAGE_VERSION=$SURUM
 EOF
 ln -s ../usr/lib/os-release "$KOK/etc/os-release"
@@ -62,11 +62,11 @@ chmod -R u=rwX,go=rX "$KOK"
 chmod 1777 "$KOK/tmp"
 
 # 4) Paketle: hepsi root'un, genişletilmiş öznitelik yok; yeni dosyaya yaz, sonra yerine koy.
-mksquashfs "$KOK" "$CIKTI/zar-masasi.raw.yeni" -noappend -all-root -no-xattrs -no-progress >/dev/null
-mv -f "$CIKTI/zar-masasi.raw.yeni" "$CIKTI/zar-masasi.raw"
+mksquashfs "$KOK" "$CIKTI/roleplay.raw.yeni" -noappend -all-root -no-xattrs -no-progress >/dev/null
+mv -f "$CIKTI/roleplay.raw.yeni" "$CIKTI/roleplay.raw"
 
 # 5) kur.sh hangi depodan indireceğini bilsin
 sed "s|^DEPO=.*|DEPO=$DEPO|" kurulum/kur.sh >"$CIKTI/kur.sh"
-(cd "$CIKTI" && sha256sum zar-masasi.raw kur.sh >SHA256SUMS)
+(cd "$CIKTI" && sha256sum roleplay.raw kur.sh >SHA256SUMS)
 
-echo "Hazır: $CIKTI/  (Zar Masası $SURUM, imaj $(du -k "$CIKTI/zar-masasi.raw" | cut -f1) KB)"
+echo "Hazır: $CIKTI/  (Roleplay $SURUM, imaj $(du -k "$CIKTI/roleplay.raw" | cut -f1) KB)"

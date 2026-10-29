@@ -1,4 +1,4 @@
-# Zar Masası
+# Roleplay
 
 Kendi sunucunda çalışan, Fallout 1 gibi sıra tabanlı bir sanal oyun masası. Oyuncular sesli konuşur; ekranda harita, tur sırası, zarlar, statlar ve envanter durur.
 
@@ -12,7 +12,7 @@ Kendi sunucunda çalışan, Fallout 1 gibi sıra tabanlı bir sanal oyun masası
 
 ```bash
 make
-GM_SIFRESI=gizli-gm-sifresi OYUN_SIFRESI=deneme ./zar-masasi
+GM_SIFRESI=gizli-gm-sifresi OYUN_SIFRESI=deneme ./roleplay
 ```
 
 GM `http://127.0.0.1:3000/gm` adresini, oyuncular `http://127.0.0.1:3000` adresini açar. `make test` birim testlerini çalıştırır.
@@ -29,10 +29,10 @@ sudo apt install -y systemd-container curl
 curl -fsSL https://github.com/TahaGemici/roleplay/releases/latest/download/kur.sh | sudo sh
 ```
 
-İlk seferde `/var/lib/zar-masasi/.env` oluşur ve kurulum durur. `GM_SIFRESI`, `OYUN_SIFRESI` ve `ALAN_ADI` değerlerini yazıp komutu tekrar çalıştır:
+İlk seferde `/var/lib/roleplay/.env` oluşur ve kurulum durur. `GM_SIFRESI`, `OYUN_SIFRESI` ve `ALAN_ADI` değerlerini yazıp komutu tekrar çalıştır:
 
 ```bash
-sudo nano /var/lib/zar-masasi/.env
+sudo nano /var/lib/roleplay/.env
 ```
 
 HTTPS için Caddy kur (alan adının A kaydı sunucuyu göstermeli, 80 ve 443 açık olmalı):
@@ -53,14 +53,14 @@ nginx kullanıyorsan `kurulum/nginx.conf`'a bak.
 | --- | --- |
 | Güncelle | kurulum komutunun aynısı |
 | Eski bir sürüme dön | kurulum komutunun sonuna `-s v41` ekle |
-| Günlük | `journalctl -u systemd-nspawn@zar-masasi -f` |
-| `.env` değişince | `sudo systemctl restart systemd-nspawn@zar-masasi` |
-| Yedek al | `sudo tar -czf oyun-yedek.tgz -C /var/lib/zar-masasi oyun` |
+| Günlük | `journalctl -u systemd-nspawn@roleplay -f` |
+| `.env` değişince | `sudo systemctl restart systemd-nspawn@roleplay` |
+| Yedek al | `sudo tar -czf oyun-yedek.tgz -C /var/lib/roleplay oyun` |
 
 Depo özelse sürümler herkese açık olmaz. Bu durumda sunucuda `gh auth login` ile giriş yapıp şunu çalıştır:
 
 ```bash
-gh release download -R TahaGemici/roleplay -p zar-masasi.raw -p kur.sh --clobber && sudo sh kur.sh zar-masasi.raw
+gh release download -R TahaGemici/roleplay -p roleplay.raw -p kur.sh --clobber && sudo sh kur.sh roleplay.raw
 ```
 
 ## Oyun kuralları: `sunucu/kurallar.c`
@@ -130,4 +130,4 @@ Fonksiyonlar hızlı bitmeli; çalışırken sunucu bekler. Değişiklikten sonr
 
 - Bir sunucu tek bir oyun çalıştırır.
 - Harita bir resimdir, duvarları bilmez: görüş duvarlardan geçer. Engelleri GM yönetir.
-- Oyunun bütün verisi `oyun/` klasöründedir (sunucuda `/var/lib/zar-masasi/oyun`); yedek için bu klasörü kopyalamak yeter.
+- Oyunun bütün verisi `oyun/` klasöründedir (sunucuda `/var/lib/roleplay/oyun`); yedek için bu klasörü kopyalamak yeter.

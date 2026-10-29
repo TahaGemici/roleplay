@@ -1,23 +1,23 @@
 #!/bin/sh
-# Zar Masası'nı systemd-nspawn konteyneri olarak kurar, başlatır ve günceller. Hepsi aynı komut:
+# Roleplay'i systemd-nspawn konteyneri olarak kurar, başlatır ve günceller. Hepsi aynı komut:
 #
 #   curl -fsSL https://github.com/TahaGemici/roleplay/releases/latest/download/kur.sh | sudo sh
 #
 # GitHub'daki en son sürümü indirir, SHA-256 ile doğrular, çalışanın yerine koyar ve yeniden başlatır.
 #   ... | sudo sh -s v42               belirli bir sürüm (ör. geri dönmek için)
-#   sudo sh kur.sh zar-masasi.raw      elindeki imaj (özel depo ya da make imaj)
+#   sudo sh kur.sh roleplay.raw        elindeki imaj (özel depo ya da make imaj)
 #
 # Sunucuya yazdıkları:
-#   /var/lib/machines/zar-masasi.raw            imaj (salt okunur)
-#   /etc/systemd/nspawn/zar-masasi.nspawn       konteyner ayarları (imajın içinden)
-#   /etc/systemd/system/systemd-nspawn@zar-masasi.service.d/zar-masasi.conf  servis ayarı (imajın içinden)
-#   /var/lib/zar-masasi/                        .env ve oyun/ (konteynerde /veri); içeriğine dokunulmaz
+#   /var/lib/machines/roleplay.raw            imaj (salt okunur)
+#   /etc/systemd/nspawn/roleplay.nspawn       konteyner ayarları (imajın içinden)
+#   /etc/systemd/system/systemd-nspawn@roleplay.service.d/roleplay.conf  servis ayarı (imajın içinden)
+#   /var/lib/roleplay/                        .env ve oyun/ (konteynerde /veri); içeriğine dokunulmaz
 set -eu
 
-# GitHub deposu (kullanici/zar-masasi). Sürümlerdeki kur.sh'ye imaj-olustur.sh yazar.
+# GitHub deposu (kullanici/roleplay). Sürümlerdeki kur.sh'ye imaj-olustur.sh yazar.
 DEPO=
 
-AD=zar-masasi
+AD=roleplay
 IMAJ=/var/lib/machines/$AD.raw
 VERI=/var/lib/$AD
 SERVIS=systemd-nspawn@$AD.service
@@ -69,7 +69,7 @@ main() {
 
 	# 2) Ayarlar imajın içinden gelir; her sürüm kendi ayarlarını getirir
 	systemd-dissect --copy-from "$GECICI/imaj" "/usr/share/$AD/kurulum" "$GECICI/kurulum" >/dev/null 2>&1 ||
-		hata "bu bir Zar Masası imajı değil."
+		hata "bu bir Roleplay imajı değil."
 	SURUM=$(systemd-dissect --copy-from "$GECICI/imaj" /usr/lib/os-release - 2>/dev/null | sed -n 's/^IMAGE_VERSION=//p')
 	install -D -m 0644 "$GECICI/kurulum/$AD.nspawn" "/etc/systemd/nspawn/$AD.nspawn"
 	install -D -m 0644 "$GECICI/kurulum/servis.conf" "/etc/systemd/system/$SERVIS.d/$AD.conf"
@@ -90,7 +90,7 @@ main() {
 	mv -f "$GECICI/imaj" "$IMAJ"
 	systemctl daemon-reload
 	systemctl enable --quiet "$SERVIS" machines.target
-	echo "Zar Masası $SURUM kuruldu."
+	echo "Roleplay $SURUM kuruldu."
 
 	if ! grep -Eq '^[[:space:]]*GM_SIFRESI[[:space:]]*=[[:space:]]*[^[:space:]#]' "$VERI/.env"; then
 		cat <<EOF
@@ -109,7 +109,7 @@ EOF
 	CALISTI=
 	for _ in 1 2 3 4 5 6 7 8 9 10; do
 		sleep 1
-		if journalctl -u "$SERVIS" --since "@$BASLA" -o cat --no-pager 2>/dev/null | grep -q 'Zar Masası çalışıyor'; then
+		if journalctl -u "$SERVIS" --since "@$BASLA" -o cat --no-pager 2>/dev/null | grep -q 'Roleplay çalışıyor'; then
 			CALISTI=1
 			break
 		fi
@@ -119,14 +119,14 @@ EOF
 	if [ -z "$CALISTI" ]; then
 		cat <<EOF >&2
 
-Zar Masası açılmadı. Yukarıdaki hatayı düzelt (çoğunlukla $VERI/.env), sonra:
+Roleplay açılmadı. Yukarıdaki hatayı düzelt (çoğunlukla $VERI/.env), sonra:
     sudo systemctl restart $SERVIS
 EOF
 		exit 1
 	fi
 	cat <<EOF
 
-Zar Masası $SURUM konteynerde çalışıyor; sunucu açılınca kendiliğinden başlar.
+Roleplay $SURUM konteynerde çalışıyor; sunucu açılınca kendiliğinden başlar.
   Günlük     journalctl -u $SERVIS -f
   Ayarlar    sudo nano $VERI/.env   sonra   sudo systemctl restart $SERVIS
   Güncelle   $GUNCELLE

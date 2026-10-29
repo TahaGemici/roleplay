@@ -1,5 +1,5 @@
 /*
- * Zar Masası sunucusu.
+ * Roleplay sunucusu.
  *
  *   /           oyuncu ekranı (giriş: isim + oyun şifresi)
  *   /gm         GM ekranı (giriş: .env dosyasındaki GM_SIFRESI)
@@ -872,7 +872,7 @@ int main(void)
     pthread_create(&kt, NULL, kaydedici, NULL);
     pthread_detach(kt);
 
-    printf("Zar Masası çalışıyor: %s   (oyun klasörü: %s)\n", yap.dinle, yap.oyun_klasoru);
+    printf("Roleplay çalışıyor: %s   (oyun klasörü: %s)\n", yap.dinle, yap.oyun_klasoru);
     gm_bilgisini_yazdir();
 
     pthread_attr_t oz;

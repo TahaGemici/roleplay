@@ -1,5 +1,5 @@
-# Zar Masası — derleme
-#   make          sunucuyu derler (./zar-masasi)
+# Roleplay — derleme
+#   make          sunucuyu derler (./roleplay)
 #   make test     birim testlerini çalıştırır
 #   make imaj     sürüm dosyalarını üretir: cikti/ (imaj, kur.sh; musl-tools ve squashfs-tools gerekir)
 #   make temizle  derleme çıktılarını siler
@@ -12,7 +12,7 @@ override LDLIBS  += -lm
 
 # Kendi kurallarını başka bir dosyada tutmak istersen:  make KURALLAR=benim_kurallarim.c
 KURALLAR ?= sunucu/kurallar.c
-HEDEF    ?= zar-masasi
+HEDEF    ?= roleplay
 
 KAYNAK = sunucu/main.c sunucu/oyun.c $(KURALLAR) sunucu/http.c sunucu/ws.c \
          sunucu/json.c sunucu/zar.c sunucu/gorsel.c sunucu/dosya.c sunucu/geometri.c sunucu/ortak.c
@@ -33,7 +33,7 @@ imaj:
 	kurulum/imaj-olustur.sh
 
 temizle:
-	rm -f zar-masasi zar-masasi-test zar-masasi-tsan test/birim
+	rm -f roleplay roleplay-test roleplay-tsan test/birim
 	rm -rf cikti
 
 .PHONY: test imaj temizle

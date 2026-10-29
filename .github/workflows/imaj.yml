@@ -1,4 +1,4 @@
-# Zar Masası: main'e her push'ta test, imaj, Ubuntu'da deneme ve yeni bir GitHub sürümü (v1, v2, ...).
+# Roleplay: main'e her push'ta test, imaj, Ubuntu'da deneme ve yeni bir GitHub sürümü (v1, v2, ...).
 #
 # Sunucuda kurmak, başlatmak ve güncellemek (repo gerekmez, yalnızca son sürüm indirilir):
 #   curl -fsSL https://github.com/TahaGemici/roleplay/releases/latest/download/kur.sh | sudo sh
@@ -68,13 +68,13 @@ jobs:
 
       - name: İlk kurulum (.env oluşur; GM şifresi boş olduğu için başlamaz)
         run: |
-          sudo sh cikti/kur.sh cikti/zar-masasi.raw | tee kur.log
+          sudo sh cikti/kur.sh cikti/roleplay.raw | tee kur.log
           grep -q 'Başlatmadan önce ayarları yaz' kur.log
 
       - name: .env'i doldur ve başlat
         run: |
-          sudo sed -i 's/^GM_SIFRESI=.*/GM_SIFRESI=ci-gm-sifresi-123/; s/^OYUN_SIFRESI=.*/OYUN_SIFRESI=deneme/' /var/lib/zar-masasi/.env
-          sudo sh cikti/kur.sh cikti/zar-masasi.raw
+          sudo sed -i 's/^GM_SIFRESI=.*/GM_SIFRESI=ci-gm-sifresi-123/; s/^OYUN_SIFRESI=.*/OYUN_SIFRESI=deneme/' /var/lib/roleplay/.env
+          sudo sh cikti/kur.sh cikti/roleplay.raw
 
       - name: Sunucu konteynerden yanıt veriyor mu
         run: |
@@ -83,15 +83,15 @@ jobs:
           curl -fsS -o /dev/null -H 'Content-Type: application/json' -d '{"sifre":"ci-gm-sifresi-123"}' http://127.0.0.1:3000/api/gm-giris
           machinectl list --no-pager || true
           # Konteynerin root'u sunucuda ayrıcalıksız UID 1514995712'dir; program onunla çalışmalı
-          ps -o uid=,args= -C zar-masasi | tee ps.log
-          grep -Eq '^ *1514995712 /usr/bin/zar-masasi$' ps.log
+          ps -o uid=,args= -C roleplay | tee ps.log
+          grep -Eq '^ *1514995712 /usr/bin/roleplay$' ps.log
 
       - name: Durdurunca oyun kaydediliyor mu
         run: |
-          sudo systemctl stop systemd-nspawn@zar-masasi.service
-          sudo journalctl -u systemd-nspawn@zar-masasi.service -o cat --no-pager | tee gunluk.log
+          sudo systemctl stop systemd-nspawn@roleplay.service
+          sudo journalctl -u systemd-nspawn@roleplay.service -o cat --no-pager | tee gunluk.log
           grep -q 'Kapanıyor, oyun kaydediliyor' gunluk.log
-          sudo test -s /var/lib/zar-masasi/oyun/durum.json
+          sudo test -s /var/lib/roleplay/oyun/durum.json
 
   yayinla:
     name: Sürümü yayınla
@@ -111,7 +111,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          DOSYALAR=(cikti/zar-masasi.raw cikti/kur.sh cikti/SHA256SUMS)
+          DOSYALAR=(cikti/roleplay.raw cikti/kur.sh cikti/SHA256SUMS)
           NOTLAR="Kurmak ya da güncellemek için sunucuda:
 
               curl -fsSL https://github.com/$GH_REPO/releases/latest/download/kur.sh | sudo sh

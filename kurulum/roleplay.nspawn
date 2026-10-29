@@ -1,5 +1,5 @@
-# Zar Masası konteynerinin ayarları. İmajın içinde gelir; kur.sh /etc/systemd/nspawn/ altına yazar.
-# systemd-nspawn@zar-masasi servisi bir işletim sistemi açar gibi --boot, --network-veth, -U ve
+# Roleplay konteynerinin ayarları. İmajın içinde gelir; kur.sh /etc/systemd/nspawn/ altına yazar.
+# systemd-nspawn@roleplay servisi bir işletim sistemi açar gibi --boot, --network-veth, -U ve
 # --link-journal ile başlatır; bu dosyayı --settings=override ile okuduğu için buradakiler geçerlidir.
 
 [Exec]
@@ -7,10 +7,10 @@
 # sinyalini (SIGRTMIN+3) alınca sunucuya SIGTERM gönderir, sunucu oyunu kaydedip çıkar.
 ProcessTwo=yes
 KillSignal=SIGRTMIN+3
-Parameters=/usr/bin/zar-masasi
+Parameters=/usr/bin/roleplay
 WorkingDirectory=/veri
 Environment=OYUN_KLASORU=/veri/oyun
-Environment=WEB_KLASORU=/usr/share/zar-masasi/web
+Environment=WEB_KLASORU=/usr/share/roleplay/web
 
 # Konteynerin root'u sunucuda ayrıcalıksız bir kullanıcıdır (UID 1514995712) ve hiçbir yetkisi yoktur.
 # kur.sh veri klasörünü bu kullanıcıya verir.
@@ -24,8 +24,8 @@ Timezone=off
 LinkJournal=no
 
 [Files]
-# Sunucudaki /var/lib/zar-masasi (.env ve oyun/) konteynerde /veri olur.
-Bind=/var/lib/zar-masasi:/veri
+# Sunucudaki /var/lib/roleplay (.env ve oyun/) konteynerde /veri olur.
+Bind=/var/lib/roleplay:/veri
 
 [Network]
 # Sunucunun ağını paylaşır: program .env'deki HOST:PORT'u (127.0.0.1:3000) dinler, Caddy oraya yönlendirir.
