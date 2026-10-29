@@ -120,5 +120,5 @@ jobs:
           if gh release view "$SURUM" >/dev/null 2>&1; then # aynı çalıştırma yeniden denendiyse
             gh release upload "$SURUM" "${DOSYALAR[@]}" --clobber
           else
-            gh release create "$SURUM" "${DOSYALAR[@]}" --target "$GITHUB_SHA" --title "Zar Masası $SURUM" --notes "$NOTLAR"
+            gh release create "$SURUM" "${DOSYALAR[@]}" --target "$GITHUB_SHA" --title "${GH_REPO#*/} $SURUM" --notes "$NOTLAR"
           fi
