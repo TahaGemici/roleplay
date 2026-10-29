@@ -56,7 +56,6 @@ const char *const esya_siniflari[] = {
 
 void her_tur(Oyuncu *o)
 {
-    o->enerji = 10;
 }
 
 /* ------------------------------------------------------------------ GM bir yürüyüşü onaylayınca
@@ -90,9 +89,6 @@ int hareket(Oyuncu *o, float x, float y)
 
 void saldiri(Oyuncu *saldiran, Oyuncu *hedef, Esya *esya)
 {
-    (void)saldiran; /* kullanmaya başlayınca bu üç satırı silebilirsin */
-    (void)hedef;
-
     if(strcmp(esya->sinif, "silah") != 0){
         bildir(saldiran, "Bu bir silah değil!");
         return;
