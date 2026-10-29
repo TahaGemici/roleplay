@@ -1,6 +1,7 @@
 # Zar Masası — derleme
 #   make          sunucuyu derler (./zar-masasi)
 #   make test     birim testlerini çalıştırır
+#   make imaj     sürüm dosyalarını üretir: cikti/ (imaj, kur.sh; musl-tools ve squashfs-tools gerekir)
 #   make temizle  derleme çıktılarını siler
 
 CC      ?= cc
@@ -28,7 +29,11 @@ test/birim: $(TEST_KAYNAK) $(BASLIK)
 test: test/birim
 	./test/birim
 
+imaj:
+	kurulum/imaj-olustur.sh
+
 temizle:
 	rm -f zar-masasi zar-masasi-test zar-masasi-tsan test/birim
+	rm -rf cikti
 
-.PHONY: test temizle
+.PHONY: test imaj temizle

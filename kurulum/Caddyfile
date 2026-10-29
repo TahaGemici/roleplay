@@ -1,4 +1,4 @@
-# /etc/caddy/Caddyfile — Docker kullanmayan kurulum için.
+# /etc/caddy/Caddyfile — Zar Masası'nın önündeki HTTPS. Konteyner sunucunun 127.0.0.1:3000 adresini dinler.
 # "oyun.ornek.com" yerine kendi alan adını yaz, sonra:  sudo systemctl reload caddy
 # Caddy sertifikayı otomatik alır/yeniler ve WebSocket bağlantılarını kendiliğinden taşır.
 

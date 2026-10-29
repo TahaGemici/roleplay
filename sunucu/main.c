@@ -812,7 +812,7 @@ int main(void)
 
     klasor_ayarla("OYUN_KLASORU", ortam("OYUN_KLASORU", "oyun"), yap.oyun_klasoru, 1);
     klasor_ayarla("WEB_KLASORU", ortam("WEB_KLASORU", "web"), yap.web_klasoru, 0);
-    kopyala(yap.alan_adi, sizeof yap.alan_adi, ortam("ALAN_ADI", ortam("DOMAIN", "")));
+    kopyala(yap.alan_adi, sizeof yap.alan_adi, ortam("ALAN_ADI", ""));
     kopyala(yap.ilk_sifre, sizeof yap.ilk_sifre, ortam("OYUN_SIFRESI", ""));
     if (yap.ilk_sifre[0] && !strcmp(yap.ilk_sifre, ortam("GM_SIFRESI", ""))) {
         fprintf(stderr, "GM_SIFRESI ile OYUN_SIFRESI aynı olamaz: oyuncular GM ekranına da girebilirdi.\n");
@@ -860,10 +860,13 @@ int main(void)
         return 1;
     }
 
+    /* Üçünde de oyun kaydedilip çıkılır. SIGHUP terminal kapanınca gelir; nspawn'ın init'i de durdururken
+     * SIGTERM'in hemen ardından SIGHUP gönderir. */
     struct sigaction sa = { 0 };
     sa.sa_handler = sinyal;
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
+    sigaction(SIGHUP, &sa, NULL);
 
     pthread_t kt;
     pthread_create(&kt, NULL, kaydedici, NULL);

@@ -1,8 +1,0 @@
-# Docker Compose kurulumu için. Alan adı .env dosyasındaki ALAN_ADI değerinden gelir.
-# Caddy sertifikayı otomatik alır/yeniler ve WebSocket bağlantılarını kendiliğinden taşır.
-
-{$ALAN_ADI} {
-	encode zstd gzip
-	reverse_proxy masa:3000
-	header Strict-Transport-Security "max-age=31536000"
-}

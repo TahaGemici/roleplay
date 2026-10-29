@@ -1,0 +1,32 @@
+# Zar Masası konteynerinin ayarları. İmajın içinde gelir; kur.sh /etc/systemd/nspawn/ altına yazar.
+# systemd-nspawn@zar-masasi servisi bir işletim sistemi açar gibi --boot, --network-veth, -U ve
+# --link-journal ile başlatır; bu dosyayı --settings=override ile okuduğu için buradakiler geçerlidir.
+
+[Exec]
+# İşletim sistemi açılmaz, doğrudan sunucu çalışır. PID 1'de nspawn'ın küçük init'i durur: kapatma
+# sinyalini (SIGRTMIN+3) alınca sunucuya SIGTERM gönderir, sunucu oyunu kaydedip çıkar.
+ProcessTwo=yes
+KillSignal=SIGRTMIN+3
+Parameters=/usr/bin/zar-masasi
+WorkingDirectory=/veri
+Environment=OYUN_KLASORU=/veri/oyun
+Environment=WEB_KLASORU=/usr/share/zar-masasi/web
+
+# Konteynerin root'u sunucuda ayrıcalıksız bir kullanıcıdır (UID 1514995712) ve hiçbir yetkisi yoktur.
+# kur.sh veri klasörünü bu kullanıcıya verir.
+PrivateUsers=1514995712
+DropCapability=all
+NoNewPrivileges=yes
+
+# İmaj salt okunur: nspawn içine DNS, saat dilimi ya da günlük bağlantısı kurmaya çalışmasın.
+ResolvConf=off
+Timezone=off
+LinkJournal=no
+
+[Files]
+# Sunucudaki /var/lib/zar-masasi (.env ve oyun/) konteynerde /veri olur.
+Bind=/var/lib/zar-masasi:/veri
+
+[Network]
+# Sunucunun ağını paylaşır: program .env'deki HOST:PORT'u (127.0.0.1:3000) dinler, Caddy oraya yönlendirir.
+VirtualEthernet=no

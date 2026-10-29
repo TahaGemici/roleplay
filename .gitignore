@@ -1,6 +1,9 @@
-zar-masasi
-zar-masasi-test
-zar-masasi-tsan
-test/birim
-oyun/
-.env
+# Derleme çıktıları
+/zar-masasi
+/zar-masasi-test
+/zar-masasi-tsan
+/test/birim
+/cikti/
+# Yerel deneme verisi ve gizli ayarlar
+/oyun/
+/.env

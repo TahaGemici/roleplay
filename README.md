@@ -13,6 +13,7 @@ Kendi sunucunda, kendi alan adınla çalışan, Fallout 1 gibi sıra tabanlı bi
 - **Statlar:** Can, odak, zırh, büyü direnci, enerji, görüş. GM herkesinkini görür, oyuncu yalnızca kendisininkini.
 - **Zarlar sunucuda atılır**, kimse tarayıcıdan değiştiremez.
 - **Tek klasör:** oyunun bütün dosyaları `oyun/` klasöründe durur ve GM bu klasöre web'deki **Dosyalar** ekranından tam erişir.
+- **Kurulum otomatik:** `main`'e push'ladığında GitHub Actions testleri çalıştırır, yarım megabaytlık bir systemd-nspawn imajı üretir, temiz bir Ubuntu'da kurup dener ve yeni bir sürüm yayınlar. Sunucu repoyu değil yalnızca son sürümü indirir; kurmak da güncellemek de tek komut.
 
 ---
 
@@ -40,55 +41,70 @@ GM_SIFRESI=gizli-gm-sifresi OYUN_SIFRESI=deneme ./zar-masasi
 1. **DNS:** Alan adının panelinde bir A kaydı aç: `oyun.alanadin.com → sunucunun IP adresi`.
 2. **Güvenlik duvarı:** 80 ve 443 portları açık olsun (Let's Encrypt sertifikayı alırken 80'i kullanır).
 
-HTTPS'i [Caddy](https://caddyserver.com) sağlar: sertifikayı kendisi alır, yeniler ve WebSocket bağlantılarını ek ayarsız taşır. C sunucusu dışarıya kapalıdır; herkes yalnızca `https://` ile bağlanır.
+### Sürümler
 
-### Yol A: Docker (en kolayı)
+Projeyi GitHub'a koy. `main` dalına her push'ta GitHub Actions (`.github/workflows/imaj.yml`):
+
+1. birim testlerini çalıştırır,
+2. sunucuyu musl ile statik derleyip `zar-masasi.raw` imajını paketler,
+3. imajı temiz bir Ubuntu'da `kur.sh` ile kurup systemd-nspawn'da dener: açılıyor mu, GM girebiliyor mu, durdurunca oyunu kaydediyor mu,
+4. hepsi geçerse deponun **Releases** sayfasında yeni bir sürüm açar (`v1`, `v2`, ...): `zar-masasi.raw`, `kur.sh` ve `SHA256SUMS`.
+
+İmaj yarım megabaytlık, salt okunur bir dosya sistemidir: statik derlenmiş sunucu, web arayüzü ve konteynerin ayarları. Kabuk, paket yöneticisi, kütüphane yoktur. Oyunun verisi ve `.env` imajda değil, sunucudaki `/var/lib/zar-masasi` klasöründedir; imajı değiştirmek oyuna dokunmaz. Konteyner sunucunun ağını paylaşır, içindeki root ise sunucuda hiçbir yetkisi olmayan ayrı bir kullanıcıdır.
+
+### Sunucuda
+
+Gerekenler: systemd 255 ya da yenisi (Ubuntu 24.04+, Debian 13+). Sunucuya repo inmez; kurmak, başlatmak ve güncellemek hep aynı komut:
 
 ```bash
-cd zar-masasi
-cp .env.example .env
-nano .env                       # ALAN_ADI, GM_SIFRESI, OYUN_SIFRESI
-docker compose up -d --build
-docker compose logs masa        # "Zar Masası çalışıyor" satırını görmelisin
+sudo apt install -y systemd-container curl
+curl -fsSL https://github.com/KULLANICI/zar-masasi/releases/latest/download/kur.sh | sudo sh
 ```
 
-GM `https://oyun.alanadin.com/gm` adresini açar ve GM şifresini yazar. İşte bu kadar.
-
-| İş | Komut |
-| --- | --- |
-| Günlüğü izle | `docker compose logs -f masa` |
-| `kurallar.c`'yi ya da `.env`'i değiştirdikten sonra | `docker compose up -d --build` |
-| Yedek al | `docker compose cp masa:/veri/oyun ./oyun-yedek` |
-
-### Yol B: Docker'sız (Ubuntu/Debian, systemd + Caddy)
+(`KULLANICI` yerine GitHub kullanıcı adın.) Komut son sürümü indirir, SHA-256 ile doğrular ve kurar. İlk seferde `/var/lib/zar-masasi/.env` dosyasını oluşturup durur: GM şifresini yaz ve komutu yeniden çalıştır. "Zar Masası çalışıyor" satırını görmelisin.
 
 ```bash
-# 1) Derle
-sudo apt install -y build-essential
-make
+sudo nano /var/lib/zar-masasi/.env      # GM_SIFRESI, OYUN_SIFRESI, ALAN_ADI
+```
 
-# 2) Yerleştir: ayrı bir sistem kullanıcısıyla /opt altına
-sudo useradd --system --home /opt/zar-masasi --shell /usr/sbin/nologin zarmasasi
-sudo mkdir -p /opt/zar-masasi/oyun
-sudo cp -r zar-masasi web .env.example /opt/zar-masasi/
-cd /opt/zar-masasi
-sudo cp .env.example .env && sudo nano .env      # ALAN_ADI, GM_SIFRESI, OYUN_SIFRESI; HOST=127.0.0.1 kalsın
-sudo chown -R zarmasasi:zarmasasi oyun
-sudo chown root:zarmasasi .env && sudo chmod 640 .env
+Son olarak HTTPS'i [Caddy](https://caddyserver.com) sağlar: sertifikayı kendisi alır, yeniler ve WebSocket bağlantılarını ek ayarsız taşır. Program dışarıya kapalıdır, herkes yalnızca `https://` ile bağlanır.
 
-# 3) Servis: açılışta başlasın, çökerse yeniden başlasın
-sudo cp ~/zar-masasi/kurulum/manuel/zar-masasi.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now zar-masasi
-journalctl -u zar-masasi -n 20
-
-# 4) Caddy: https://caddyserver.com/docs/install adresindeki Debian/Ubuntu adımlarıyla kur, sonra
-sudo cp ~/zar-masasi/kurulum/manuel/Caddyfile /etc/caddy/Caddyfile
-sudo nano /etc/caddy/Caddyfile                    # oyun.ornek.com yerine kendi alan adın
+```bash
+sudo apt install -y caddy
+sudo tee /etc/caddy/Caddyfile <<'SON'
+oyun.alanadin.com {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:3000
+	header Strict-Transport-Security "max-age=31536000"
+}
+SON
 sudo systemctl reload caddy
 ```
 
-`~/zar-masasi` yerine proje klasörünü nereye açtıysan onu yaz. Caddy yerine nginx kullanacaksan `kurulum/manuel/nginx.conf` içindeki adımları izle.
+Sunucunda zaten nginx varsa Caddy yerine `kurulum/nginx.conf`'u kullan.
+
+GM `https://oyun.alanadin.com/gm` adresini açar ve GM şifresini yazar. Konteyner sunucu her açıldığında kendiliğinden başlar, program çökerse yeniden başlar.
+
+| İş | Komut |
+| --- | --- |
+| Güncelle (push'tan sonra, Actions bitince) | kurulum komutunun aynısı |
+| Belirli bir sürüme geç ya da geri dön | kurulum komutunun sonuna `-s v41` ekle |
+| Günlüğü izle | `journalctl -u systemd-nspawn@zar-masasi -f` |
+| `.env`'i değiştirdikten sonra | `sudo systemctl restart systemd-nspawn@zar-masasi` |
+| Durdur / başlat | `sudo machinectl stop zar-masasi` / `sudo machinectl start zar-masasi` |
+| Terminalde çalıştır (önce durdur; Ctrl+C oyunu kaydedip kapatır) | `sudo systemd-nspawn -M zar-masasi` |
+| Yedek al | `sudo tar -czf oyun-yedek.tgz -C /var/lib/zar-masasi oyun` |
+
+Güncellerken yeni imaj doğrulanıp çalışanın yerine konur ve konteyner yeniden başlar; eski sunucu kapanırken oyunu kaydeder. `.env`'e ve oyunun dosyalarına dokunulmaz. Konteynerin ayarları imajın içinde gelir, yani her sürüm kendi ayarlarıyla kurulur.
+
+**Depo özelse** sürümler herkese açık değildir. Sunucuda [GitHub CLI](https://cli.github.com) ile bir kere giriş yap (`gh auth login`), sonra kurmak ve güncellemek için:
+
+```bash
+gh release download -R KULLANICI/zar-masasi -p zar-masasi.raw -p kur.sh --clobber
+sudo sh kur.sh zar-masasi.raw
+```
+
+**Kendi imajın:** `sudo apt install make musl-tools squashfs-tools`, sonra `make imaj` sürüm dosyalarını `cikti/` klasörüne yazar; `sudo sh cikti/kur.sh cikti/zar-masasi.raw` ile kurarsın.
 
 ### Kurulumdan sonra
 
@@ -188,9 +204,7 @@ void saldiri(Oyuncu *saldiran, Oyuncu *hedef, Esya *esya)
 
 ### Dikkat
 
-- Değiştirdikten sonra programı yeniden derleyip başlat:
-  - **Docker:** `docker compose up -d --build`
-  - **Docker'sız:** `make && sudo cp zar-masasi /opt/zar-masasi/ && sudo systemctl restart zar-masasi`
+- Değiştirdikten sonra commit'le ve `main`'e push'la. Actions yeni sürümü birkaç dakikada üretip dener; sonra sunucuda kurulum komutunu çalıştır. Push'lamadan önce kendi bilgisayarında `make test` ve `make && ./zar-masasi` ile deneyebilirsin.
 - Fonksiyonlar hızlı bitmeli; onlar çalışırken sunucu diğer istekleri bekletir.
 - `envanter` dizisini yalnızca `envanter_ekle` ve `envanter_cikar` ile büyütüp küçült; elemanlarını doğrudan değiştirebilirsin. `envanter_ekle` dizinin yerini değiştirebilir: elindeki eski `Esya *` göstericisini sonra kullanma. `saldiri()` içinde eşyayı çıkaracaksan bunu en sonda yap: `envanter_cikar(saldiran, (int)(esya - saldiran->envanter));`
 - Bir stat hatayla NaN ya da sonsuz olursa sunucu onu eski değerine döndürür ve GM'e yazar.
@@ -284,36 +298,43 @@ Zar ifadeleri: `d20`, `2d6+3`, `1d8+1d6-1`, `d%`, `4d6kh3` (en yüksek 3), `4d6d
 - Yüklenen dosyalar tarayıcıda betik çalıştıramaz: korumalı alanda (sandbox) ve gerekirse indirme olarak açılır.
 - Oturumlar `HttpOnly` ve `SameSite=Strict` çerezlerle tutulur; başka sitelerden gelen istekler reddedilir. Hatalı şifre denemeleri IP başına sınırlıdır (15 dakikada 10).
 - Zarlar işletim sisteminin güvenli rastgele kaynağıyla (`getrandom`) ve modulo yanlılığı olmadan atılır.
+- Sunucuda program salt okunur bir imajda, kendi kullanıcı ad alanında çalışır: içerideki root sunucuda ayrıcalıksız bir kullanıcıdır (UID 1514995712), hiçbir yetkisi (capability) yoktur ve yenisini alamaz. Sunucunun dosyalarından yalnızca `/var/lib/zar-masasi`'yı görür; imajda kabuk ya da başka bir program yoktur. Program statik ve adresleri her açılışta rastgele (static-pie) derlenir.
 
 ## 7. Yedekleme
 
-Bütün oyun `oyun/` klasöründedir:
+Bütün oyun sunucudaki `/var/lib/zar-masasi/oyun` klasöründedir (kendi bilgisayarında denerken `oyun/`):
 
 - `durum.json`: karakterler, statlar, envanterler, konumlar, keşifler, sıra, kayıt ve ayarlar
 - `haritalar/`
 - `esyalar/` (sınıf klasörleriyle)
 - Senin eklediğin her şey
 
-Bu klasörü kopyalamak yeterli. GM, Dosyalar ekranından `durum.json`'u indirerek de yedek alabilir. v3 ve v4'ün `durum.json`'u açılışta yeni biçime çevrilir (haritaların ızgarası kare sayısına dönüşür). Daha eski bir kayıt açılmaz; `durum-eski-….json` adıyla saklanır ve yeni oyun başlar.
+Bu klasörü kopyalamak yeterli. GM, Dosyalar ekranından `durum.json`'u indirerek de yedek alabilir. `durum.json` okunamazsa (ör. elle bozulduysa) üzerine yazılmaz: `durum-bozuk-….json` adıyla saklanır ve yeni oyun başlar.
 
 ## 8. Dosyalar
 
 ```
-sunucu/kurallar.c    SENİN KURALLARIN: her_tur(), hareket(), saldiri(), eşya sınıfları
-sunucu/kurallar.h    kurallarında kullanabileceklerin (Oyuncu, Esya, Harita, yardımcılar)
-sunucu/main.c        HTTP sunucusu, yönlendirme, giriş, GM dosya yöneticisi
-sunucu/oyun.c        oyun durumu: karakterler, görüş ve hafıza, istekler, tur, ölüm, envanter, kayıt
-sunucu/geometri.c    görüş ve yürüyüş hesapları
-sunucu/zar.c         zar ifadeleri
-sunucu/ws.c          WebSocket
-sunucu/http.c        HTTP istek/yanıt yardımcıları
-sunucu/json.c        küçük JSON ayrıştırıcı
-sunucu/dosya.c       güvenli yol denetimi, klasör listeleme
-sunucu/gorsel.c      görsel türü ve boyutu (EXIF yönü dahil)
-web/                 index.html, stil.css, js/ (ana, harita, sis, efekt, tur, kayit, envanter, gm, dosyalar)
-kurulum/             Caddy, systemd ve nginx örnekleri
-test/                birim testleri (make test) ve testlerin kullandığı kurallar
-oyun/                ilk çalıştırmada oluşur: oyunun bütün dosyaları
+sunucu/kurallar.c          SENİN KURALLARIN: her_tur(), hareket(), saldiri(), eşya sınıfları
+sunucu/kurallar.h          kurallarında kullanabileceklerin (Oyuncu, Esya, Harita, yardımcılar)
+sunucu/main.c              HTTP sunucusu, yönlendirme, giriş, GM dosya yöneticisi
+sunucu/oyun.c              oyun durumu: karakterler, görüş ve hafıza, istekler, tur, ölüm, envanter, kayıt
+sunucu/geometri.c          görüş ve yürüyüş hesapları
+sunucu/zar.c               zar ifadeleri
+sunucu/ws.c                WebSocket
+sunucu/http.c              HTTP istek/yanıt yardımcıları
+sunucu/json.c              küçük JSON ayrıştırıcı
+sunucu/dosya.c             güvenli yol denetimi, klasör listeleme
+sunucu/gorsel.c            görsel türü ve boyutu (EXIF yönü dahil)
+web/                       index.html, stil.css, js/ (ana, harita, sis, efekt, tur, kayit, envanter, gm, dosyalar)
+kurulum/imaj-olustur.sh    sürüm dosyalarını üretir (make imaj): imaj, kur.sh, SHA256SUMS
+kurulum/kur.sh             sunucuda kurar, başlatır ve günceller; her sürümle yayınlanır
+kurulum/zar-masasi.nspawn  konteynerin ayarları (imajın içinde gelir)
+kurulum/servis.conf        çökünce yeniden başlatma (imajın içinde gelir)
+kurulum/Caddyfile          HTTPS için Caddy ayarı (nginx isteyene: kurulum/nginx.conf)
+.github/workflows/imaj.yml main'e her push'ta test, imaj, Ubuntu'da deneme ve yeni sürüm
+test/                      birim testleri (make test) ve testlerin kullandığı kurallar
+oyun/                      ilk çalıştırmada oluşur: oyunun bütün dosyaları
+cikti/                     make imaj'ın çıktısı: zar-masasi.raw, kur.sh, SHA256SUMS
 ```
 
 ## 9. Bilinen sınırlar

@@ -59,7 +59,8 @@ int yuzde_coz(const char *in, size_t n, char *out, size_t outn, int arti_bosluk)
     return utf8_gecerli(out, j);
 }
 
-/* Yerel ya da özel ağdan (Caddy/Docker) gelen bağlantılarda gerçek IP X-Forwarded-For'un sonundadır. */
+/* Yerel ya da özel ağdan (aynı makinedeki Caddy/nginx ya da yerel ağdaki bir vekil) gelen bağlantılarda
+ * gerçek IP X-Forwarded-For'un sonundadır. */
 static int ozel_ag(const char *ip)
 {
     return !strncmp(ip, "127.", 4) || !strcmp(ip, "::1") || !strncmp(ip, "10.", 3) || !strncmp(ip, "192.168.", 8) ||

@@ -47,7 +47,6 @@ int tur_sayisi;
 #define KUYRUK_SINIRI (8u * 1024 * 1024)
 #define OTURUM_OMRU (365LL * 24 * 3600)
 #define DIZI_N(a) ((int)(sizeof(a) / sizeof((a)[0])))
-#define KAYIT_SURUMU 4 /* durum.json biçimi; 3 de açılır (ızgarası pikseldi) */
 
 static const char *const OYUNCU_RENK[] = { "#6fa8dc", "#e3798b", "#8cc084", "#b48ee0",
                                            "#5fc3c0", "#e39459", "#d9d2c3", "#f0a3cf" };
@@ -3281,7 +3280,7 @@ void dosyalar_degisti(void)
 static void durum_json_yaz(Buf *b)
 {
     konumlari_kaydet();
-    buf_printf(b, "{\"surum\":%d,\"sayac\":%lld,\"ayarlar\":{\"oyun_adi\":", KAYIT_SURUMU, O.sayac);
+    buf_printf(b, "{\"sayac\":%lld,\"ayarlar\":{\"oyun_adi\":", O.sayac);
     buf_json_str(b, O.ayar.oyun_adi);
     buf_puts(b, ",\"sifre\":");
     buf_json_str(b, O.ayar.sifre);
@@ -3384,7 +3383,6 @@ static void envanter_yukle(Karakter *k, const Json *env)
     }
 }
 
-/* Haritanın ızgarası. Sürüm 3 kare boyutunu piksel olarak tutuyordu: görselden kare sayısına çevrilir. */
 static void izgara_yukle(HaritaKaydi *h, const Json *iz)
 {
     h->iz.genislik = sinirla_d(json_sayi(iz, "genislik", 0), 0, AZAMI_HARITA);
@@ -3394,11 +3392,6 @@ static void izgara_yukle(HaritaKaydi *h, const Json *iz)
     h->iz.acik = json_mantik(iz, "acik", 0);
     h->iz.sis = json_mantik(iz, "sis", 1);
     h->iz.oturt = json_mantik(iz, "oturt", 0);
-    double px = json_sayi(iz, "boyut", 0);
-    if (h->iz.genislik < 1 && px >= 1 && gorsel_olcu(h)) {
-        h->iz.genislik = sinirla_d((h->gen - json_sayi(iz, "ox", 0)) / px, 1, AZAMI_HARITA);
-        h->iz.yukseklik = sinirla_d((h->yuk - json_sayi(iz, "oy", 0)) / px, 1, AZAMI_HARITA);
-    }
 }
 
 static void durum_yukle(const Json *d)
@@ -3613,15 +3606,13 @@ void oyun_baslat(void)
         while ((k = fread(tmp, 1, sizeof tmp, f)) > 0) buf_add(&b, tmp, k);
         fclose(f);
         Json *d = b.len ? json_ayristir(b.p, b.len) : NULL;
-        long long surum = 0;
-        if (d && d->tur == JSON_OBJ && json_tamsayi(d, "surum", &surum) && surum >= 3) {
+        if (d && d->tur == JSON_OBJ) {
             durum_yukle(d);
-        } else {
+        } else { /* üzerine yazılmasın: elle düzeltilebilir */
             char yedek[YOL_AZAMI + 64];
-            snprintf(yedek, sizeof yedek, "%s/durum-eski-%lld.json", yap.oyun_klasoru, simdi_sn());
+            snprintf(yedek, sizeof yedek, "%s/durum-bozuk-%lld.json", yap.oyun_klasoru, simdi_sn());
             rename(yol, yedek);
-            fprintf(stderr, "durum.json okunamadı ya da çok eski bir sürümün; %s olarak saklandı, yeni bir oyunla başlanıyor.\n",
-                    yedek);
+            fprintf(stderr, "durum.json okunamadı; %s olarak saklandı, yeni bir oyunla başlanıyor.\n", yedek);
         }
         json_sil(d);
         buf_free(&b);

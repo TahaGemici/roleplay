@@ -1,0 +1,124 @@
+# Zar Masası: main'e her push'ta test, imaj, Ubuntu'da deneme ve yeni bir GitHub sürümü (v1, v2, ...).
+#
+# Sunucuda kurmak, başlatmak ve güncellemek (repo gerekmez, yalnızca son sürüm indirilir):
+#   curl -fsSL https://github.com/KULLANICI/zar-masasi/releases/latest/download/kur.sh | sudo sh
+name: imaj
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md']
+  workflow_dispatch:
+
+concurrency:
+  group: imaj # sürümler sırayla çıksın
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash # -e -o pipefail: borudaki bir komut hata verirse adım da başarısız olur
+
+env:
+  SURUM: v${{ github.run_number }}
+
+jobs:
+  imaj:
+    name: Test ve sürüm dosyaları
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Araçları kur
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends musl-tools squashfs-tools
+
+      - name: Birim testleri
+        run: make test
+
+      - name: İmaj, kur.sh ve SHA256SUMS
+        env:
+          DEPO: ${{ github.repository }}
+        run: kurulum/imaj-olustur.sh
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: surum
+          path: cikti/
+          if-no-files-found: error
+          retention-days: 30
+
+  dene:
+    name: Ubuntu'da kur ve dene
+    needs: imaj
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: surum
+          path: cikti
+
+      - name: systemd-container
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends systemd-container
+
+      - name: İlk kurulum (.env oluşur; GM şifresi boş olduğu için başlamaz)
+        run: |
+          sudo sh cikti/kur.sh cikti/zar-masasi.raw | tee kur.log
+          grep -q 'Başlatmadan önce ayarları yaz' kur.log
+
+      - name: .env'i doldur ve başlat
+        run: |
+          sudo sed -i 's/^GM_SIFRESI=.*/GM_SIFRESI=ci-gm-sifresi-123/; s/^OYUN_SIFRESI=.*/OYUN_SIFRESI=deneme/' /var/lib/zar-masasi/.env
+          sudo sh cikti/kur.sh cikti/zar-masasi.raw
+
+      - name: Sunucu konteynerden yanıt veriyor mu
+        run: |
+          curl -fsS http://127.0.0.1:3000/saglik && echo
+          curl -fsS http://127.0.0.1:3000/ | grep -qi '<html'
+          curl -fsS -o /dev/null -H 'Content-Type: application/json' -d '{"sifre":"ci-gm-sifresi-123"}' http://127.0.0.1:3000/api/gm-giris
+          machinectl list --no-pager || true
+          # Konteynerin root'u sunucuda ayrıcalıksız UID 1514995712'dir; program onunla çalışmalı
+          ps -o uid=,args= -C zar-masasi | tee ps.log
+          grep -Eq '^ *1514995712 /usr/bin/zar-masasi$' ps.log
+
+      - name: Durdurunca oyun kaydediliyor mu
+        run: |
+          sudo systemctl stop systemd-nspawn@zar-masasi.service
+          sudo journalctl -u systemd-nspawn@zar-masasi.service -o cat --no-pager | tee gunluk.log
+          grep -q 'Kapanıyor, oyun kaydediliyor' gunluk.log
+          sudo test -s /var/lib/zar-masasi/oyun/durum.json
+
+  yayinla:
+    name: Sürümü yayınla
+    needs: dene
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: surum
+          path: cikti
+
+      - name: GitHub sürümü
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          DOSYALAR=(cikti/zar-masasi.raw cikti/kur.sh cikti/SHA256SUMS)
+          NOTLAR="Kurmak ya da güncellemek için sunucuda:
+
+              curl -fsSL https://github.com/$GH_REPO/releases/latest/download/kur.sh | sudo sh
+
+          Bu sürüme dönmek için komutun sonuna \`-s $SURUM\` ekle. Commit: $GITHUB_SHA"
+          if gh release view "$SURUM" >/dev/null 2>&1; then # aynı çalıştırma yeniden denendiyse
+            gh release upload "$SURUM" "${DOSYALAR[@]}" --clobber
+          else
+            gh release create "$SURUM" "${DOSYALAR[@]}" --target "$GITHUB_SHA" --title "Zar Masası $SURUM" --notes "$NOTLAR"
+          fi
