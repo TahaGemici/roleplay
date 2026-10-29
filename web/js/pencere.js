@@ -65,8 +65,13 @@ export async function onay({ baslik, metin, dugme = 'Evet', tehlikeli = false })
   return sonuc === 'tamam';
 }
 
+/* Ek düğmelerden biri birincilse (ör. "Kaydet") Enter onu seçer ve "Kapat" sade kalır */
 export function goster({ baslik, icerik, genis = true, ekDugmeler = [] }) {
-  return ac({ baslik, icerik, genis, dugmeler: [...ekDugmeler, { metin: 'Kapat', deger: 'kapat', sinif: 'btn-primary', varsayilan: true }] });
+  const birincil = ekDugmeler.some((b) => b.sinif?.includes('btn-primary'));
+  const dugmeler = birincil
+    ? [{ metin: 'Kapat', deger: 'kapat', sinif: 'btn-ghost' }, ...ekDugmeler.map((b) => (b.sinif?.includes('btn-primary') ? { ...b, varsayilan: true } : b))]
+    : [...ekDugmeler, { metin: 'Kapat', deger: 'kapat', sinif: 'btn-primary', varsayilan: true }];
+  return ac({ baslik, icerik, genis, dugmeler });
 }
 
 export async function duzenle({ baslik, metin }) {

@@ -211,3 +211,26 @@ export function dosyaSimgesi(tur) {
 
 export const METIN_UZANTILARI = new Set(['txt', 'md', 'json', 'csv', 'c', 'h', 'log', 'ini', 'yml', 'yaml', 'xml']);
 export const GORSEL_UZANTILARI = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg']);
+
+/* Para bakır cinsinden tutulur: 1 altın = 50 gümüş = 200 bakır */
+export const ALTIN = 200;
+export const GUMUS = 4;
+
+export function paraParcala(bakir) {
+  let b = Math.max(0, Math.floor(Number(bakir) || 0));
+  const altin = Math.floor(b / ALTIN);
+  b -= altin * ALTIN;
+  const gumus = Math.floor(b / GUMUS);
+  return { altin, gumus, bakir: b - gumus * GUMUS };
+}
+
+/* 851 → "4 altın 12 gümüş 3 bakır"; 0 → "0 bakır" */
+export function paraYaz(bakir) {
+  const p = paraParcala(bakir);
+  const parca = [p.altin && `${p.altin} altın`, p.gumus && `${p.gumus} gümüş`, p.bakir && `${p.bakir} bakır`].filter(Boolean);
+  return parca.length ? parca.join(' ') : '0 bakır';
+}
+
+/* Altın, gümüş, bakır girdilerinden bakır toplamı */
+export const paraBirlestir = (altin, gumus, bakir) =>
+  Math.max(0, Math.floor(Number(altin) || 0)) * ALTIN + Math.max(0, Math.floor(Number(gumus) || 0)) * GUMUS + Math.max(0, Math.floor(Number(bakir) || 0));

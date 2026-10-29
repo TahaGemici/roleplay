@@ -1,4 +1,4 @@
-import { $, h, throttle, debounce, bildir, dosyaYukle, dosyaAdi, sayiYaz, adKisalt, yolKodla } from './ortak.js';
+import { $, h, throttle, debounce, bildir, dosyaYukle, dosyaAdi, sayiYaz, adKisalt, yolKodla, paraParcala, paraBirlestir } from './ortak.js';
 import { onay, formAc, goster } from './pencere.js';
 import { esyaKarti, esyaOnizle, grupla, agirlikYaz } from './envanter.js';
 import { STATLAR } from './tur.js';
@@ -29,7 +29,27 @@ export function gmPaneliOlustur({ gonder, harita, gorunumAc }) {
   let durum = null;
   let secili = null;
   let bekleyenNpc = null;
+  let bekleyenOdak = null; // başka haritadaki bir karaktere gidiliyor: harita açılınca ona odaklan
+  let bekleyenPortal = null; // yeni konan portalın düzenleyicisi açılacak
   const karakter = (id) => durum?.karakterler.find((k) => k.id === id) || null;
+
+  /* Liste yalnızca gösterdiği şey değişince yeniden çizilir; araya giren bir durum, tıklanmakta olan düğmeyi
+     silip tıklamayı yutmasın */
+  const imzalar = new WeakMap();
+  function degisince(kap, imza, ciz) {
+    const s = JSON.stringify(imza);
+    if (imzalar.get(kap) === s) return;
+    imzalar.set(kap, s);
+    ciz();
+  }
+
+  /* Bir karakterin haritasına geç ve ona odaklan */
+  function haritasinaGit(k) {
+    if (!k?.harita) return;
+    if (k.burada) return harita.odakla(k.id);
+    bekleyenOdak = k.id;
+    gonder({ t: 'harita_ac', dosya: k.harita });
+  }
 
   // ------------------------------------------------------------ listeden haritaya sürükle-bırak
 
@@ -41,6 +61,7 @@ export function gmPaneliOlustur({ gonder, harita, gorunumAc }) {
     const yer = harita.kareKonumu(cx, cy);
     if (!yer || !durum.harita) return bildir('Önce bir harita aç.');
     if (veri.tur === 'karakter') gonder({ t: 'yerlestir', id: veri.id, x: yer.x, y: yer.y });
+    else if (veri.tur === 'portal') gonder({ t: 'portal_koy', x: yer.x, y: yer.y });
     else if (veri.tur === 'katalog') gonder({ t: 'esya_birak', kaynak: 'katalog', esya: veri.esya, x: yer.x, y: yer.y });
     else if (veri.tur === 'envanter') gonder({ t: 'esya_birak', kaynak: 'envanter', karakter: veri.karakter, sira: veri.sira, ad: veri.ad, x: yer.x, y: yer.y });
   }
@@ -104,28 +125,31 @@ export function gmPaneliOlustur({ gonder, harita, gorunumAc }) {
   function haritalariCiz() {
     const kap = $('#haritalar');
     const aktif = durum.harita?.dosya;
+    const imza = [durum.haritalar.map((m) => [m.dosya, m.url, m.genislik]), aktif, durum.harita?.gizli, durum.karakterler.filter((k) => !k.npc).map((k) => [k.ad, k.harita])];
+    degisince(kap, imza, () => haritaListesi(kap, aktif));
+  }
+
+  function haritaListesi(kap, aktif) {
     if (!durum.haritalar.length) {
       kap.replaceChildren(h('li', { class: 'hint', text: 'haritalar klasörü boş. Bir harita görseli yükle.' }));
       return;
     }
+    /* Her haritada kimler var: oyuncular kendi haritalarındadır; GM'in baktığı harita onları taşımaz */
     kap.replaceChildren(
-      ...durum.haritalar.map((m) =>
-        h(
+      ...durum.haritalar.map((m) => {
+        const burada = durum.karakterler.filter((k) => !k.npc && k.harita === m.dosya).map((k) => k.ad);
+        const meta = m.dosya === aktif && durum.harita.gizli ? 'Bakıyorsun · oyunculardan gizli' : burada.length ? `Burada: ${burada.join(', ')}` : 'Oyuncu yok';
+        return h(
           'li',
           {},
           h(
             'button',
-            { class: 'lib-open', type: 'button', 'aria-current': m.dosya === aktif ? 'true' : null, onclick: () => haritaAc(m) },
+            { class: 'lib-open', type: 'button', 'aria-current': m.dosya === aktif ? 'true' : null, title: m.dosya, onclick: () => haritaAc(m) },
             h('img', { class: 'lib-thumb', src: m.url, alt: '', loading: 'lazy', decoding: 'async' }),
-            h(
-              'span',
-              { class: 'lib-text' },
-              h('span', { class: 'lib-name', text: dosyaAdi(m.dosya) }),
-              h('span', { class: 'lib-meta', text: m.dosya === aktif ? (durum.harita.gizli ? 'Açık, oyunculardan gizli' : 'Oyuncular burada') : m.dosya }),
-            ),
+            h('span', { class: 'lib-text' }, h('span', { class: 'lib-name', text: dosyaAdi(m.dosya) }), h('span', { class: 'lib-meta', text: meta })),
           ),
-        ),
-      ),
+        );
+      }),
     );
   }
 
@@ -292,6 +316,14 @@ export function gmPaneliOlustur({ gonder, harita, gorunumAc }) {
     const s = durum.sira;
     const liste = s.liste.filter((id) => karakter(id));
     const kap = $('#sira-listesi');
+    const imza = [liste.map((id) => [id, karakter(id).ad, karakter(id).renk, karakter(id).olu, karakter(id).cevrimici]), s.aktif, s.sirada];
+    degisince(kap, imza, () => siraListesi(s, liste, kap));
+    const baslat = $('#sira-baslat');
+    baslat.textContent = s.aktif ? 'Turları durdur' : 'Turları başlat';
+    baslat.className = s.aktif ? 'btn' : 'btn btn-primary';
+  }
+
+  function siraListesi(s, liste, kap) {
     if (!liste.length) {
       kap.replaceChildren(h('li', { class: 'hint', text: 'Henüz kimse yok. Oyuncular adres ve şifreyle girince burada sıralanır.' }));
     } else {
@@ -319,9 +351,6 @@ export function gmPaneliOlustur({ gonder, harita, gorunumAc }) {
         }),
       );
     }
-    const baslat = $('#sira-baslat');
-    baslat.textContent = s.aktif ? 'Turları durdur' : 'Turları başlat';
-    baslat.className = s.aktif ? 'btn' : 'btn btn-primary';
   }
   $('#sira-zarla').addEventListener('click', () => gonder({ t: 'sira_zarla' }));
   $('#sira-baslat').addEventListener('click', () => gonder({ t: durum.sira.aktif ? 'sira_durdur' : 'sira_baslat' }));
@@ -334,59 +363,69 @@ export function gmPaneliOlustur({ gonder, harita, gorunumAc }) {
     karakterleriCiz();
   }
 
+  /* Karakterler üç grupta: GM'in baktığı haritadakiler, başka haritadakiler, hiçbir haritada olmayanlar.
+     Hepsi listeden baktığın haritaya sürüklenip bırakılabilir. */
   function karakterleriCiz() {
     const liste = durum.karakterler;
     if (secili && !karakter(secili)) secili = null;
     const kap = $('#karakter-listesi');
-    if (!liste.length) {
-      kap.replaceChildren(h('li', { class: 'hint', text: 'Henüz karakter yok.' }));
-    } else {
-      kap.replaceChildren(
-        ...liste.map((k) => {
-          const yerlesmemis = durum.harita && !k.yerde;
-          return h(
-            'li',
-            {},
-            suruklenebilir(
-              h(
-                'button',
-                {
-                  class: `char-row${secili === k.id ? ' is-selected' : ''}${k.olu ? ' is-dead' : ''}${yerlesmemis ? ' is-unplaced' : ''}`,
-                  type: 'button',
-                  vars: { '--c': k.renk },
-                  title: durum.harita ? `${k.ad}: haritaya sürükleyip bırakarak ${k.yerde ? 'taşı' : 'yerleştir'}` : k.ad,
-                  onclick: () => {
-                    sec(k.id);
-                    if (durum.harita && k.yerde) harita.odakla(k.id);
-                  },
-                },
-                h('span', { class: `dot${k.npc ? ' is-npc' : ''}` }),
-                h('span', { class: 'row-name', text: k.ad }),
-                k.gizli ? h('span', { class: 'row-meta', text: 'gizli' }) : null,
-                k.olu
-                  ? h('span', { class: 'row-meta is-dead', text: 'ölü' })
-                  : yerlesmemis
-                    ? h('span', { class: 'row-meta is-unplaced', text: 'haritada değil' })
-                    : !k.npc && !k.cevrimici
-                      ? h('span', { class: 'row-meta', text: 'bağlı değil' })
-                      : null,
-                h('span', { class: 'mini-stats', text: `${sayiYaz(k.statlar.can)} can · ${sayiYaz(k.statlar.enerji)} en.` }),
-              ),
-              { tur: 'karakter', id: k.id },
-              k.ad,
-            ),
-          );
-        }),
-      );
-    }
-    const bekleyen = durum.harita ? liste.filter((k) => !k.yerde).length : 0;
+    const imza = [liste.map((k) => [k.id, k.ad, k.renk, k.npc, k.olu, k.gizli, k.harita, k.burada, k.cevrimici, k.statlar.can, k.statlar.enerji]), secili, Boolean(durum.harita)];
+    degisince(kap, imza, () => karakterListesi(liste, kap));
+    const bekleyen = liste.filter((k) => !k.npc && !k.harita).length;
     $('#yerlestir-ipucu').hidden = !bekleyen;
     $('#yerlestir-ipucu').textContent = bekleyen
-      ? `${bekleyen} karakter haritada değil. Onları listeden haritaya sürükleyip bırakarak yerleştir; yerleşmeyen oyuncunun sırası geçilir.`
+      ? `${bekleyen} oyuncu hiçbir haritada değil. Onları listeden haritaya sürükleyip bırakarak yerleştir; yerleşmeyen oyuncunun sırası geçilir.`
       : '';
     $('#npc-ekle').disabled = !durum.harita;
     editorCiz();
     katalogCiz();
+  }
+
+  function karakterListesi(liste, kap) {
+    const satir = (k) => {
+      const meta = k.olu
+        ? h('span', { class: 'row-meta is-dead', text: 'ölü' })
+        : !k.harita
+          ? h('span', { class: 'row-meta is-unplaced', text: 'haritada değil' })
+          : !k.burada
+            ? h('span', { class: 'row-meta is-elsewhere', text: dosyaAdi(k.harita) })
+            : !k.npc && !k.cevrimici
+              ? h('span', { class: 'row-meta', text: 'bağlı değil' })
+              : null;
+      return h(
+        'li',
+        {},
+        suruklenebilir(
+          h(
+            'button',
+            {
+              class: `char-row${secili === k.id ? ' is-selected' : ''}${k.olu ? ' is-dead' : ''}${!k.harita ? ' is-unplaced' : ''}`,
+              type: 'button',
+              vars: { '--c': k.renk },
+              title: durum.harita ? `${k.ad}: haritaya sürükleyip bırakarak ${k.burada ? 'taşı' : 'buraya getir'}` : k.ad,
+              onclick: () => {
+                sec(k.id);
+                if (k.burada) harita.odakla(k.id);
+              },
+            },
+            h('span', { class: `dot${k.npc ? ' is-npc' : ''}` }),
+            h('span', { class: 'row-name', text: k.ad }),
+            k.gizli ? h('span', { class: 'row-meta', text: 'gizli' }) : null,
+            meta,
+            h('span', { class: 'mini-stats', text: `${sayiYaz(k.statlar.can)} can · ${sayiYaz(k.statlar.enerji)} en.` }),
+          ),
+          { tur: 'karakter', id: k.id },
+          k.ad,
+        ),
+      );
+    };
+    const gruplar = [
+      ['Bu haritada', liste.filter((k) => k.burada)],
+      ['Başka haritalarda', liste.filter((k) => k.harita && !k.burada)],
+      ['Hiçbir haritada değil', liste.filter((k) => !k.harita)],
+    ].filter(([, g]) => g.length);
+    if (!liste.length) kap.replaceChildren(h('li', { class: 'hint', text: 'Henüz karakter yok.' }));
+    else kap.replaceChildren(...gruplar.flatMap(([ad, g]) => [h('li', { class: 'list-group', text: ad }), ...g.map(satir)]));
   }
 
   // Seçili karakterin düzenleyicisi
@@ -430,6 +469,12 @@ export function gmPaneliOlustur({ gonder, harita, gorunumAc }) {
     $('#kd-baslik').textContent = k.ad;
     const etiketler = [k.npc ? 'NPC' : 'oyuncu', k.olu && 'ölü', k.gizli && 'gizli', !k.npc && !k.cevrimici && 'bağlı değil'].filter(Boolean);
     $('#kd-etiket').textContent = etiketler.join(' · ');
+    $('#kd-harita').textContent = k.harita ? (k.burada ? 'Baktığın haritada' : `Haritası: ${dosyaAdi(k.harita)}`) : 'Hiçbir haritada değil (listeden haritaya sürükle)';
+    const p = paraParcala(k.para);
+    for (const [ad, deger] of [['altin', p.altin], ['gumus', p.gumus], ['bakir', p.bakir]]) {
+      const girdi = $(`#kd-para-${ad}`);
+      if (document.activeElement !== girdi) girdi.value = String(deger);
+    }
     $('#kd-npc').hidden = !k.npc;
     if (k.npc) {
       if (document.activeElement !== kdAd) kdAd.value = k.ad;
@@ -440,61 +485,67 @@ export function gmPaneliOlustur({ gonder, harita, gorunumAc }) {
       if (document.activeElement !== girdi) girdi.value = String(Math.round(k.statlar[ad] * 100) / 100);
     }
     $('#kd-agirlik').textContent = sayiYaz(k.statlar.agirlik);
-    const islem = [];
-    islem.push(
-      k.olu
-        ? h('button', { class: 'btn btn-sm', type: 'button', onclick: () => gonder({ t: 'dirilt', id: k.id }), text: 'Dirilt' })
-        : h('button', { class: 'btn btn-sm btn-danger', type: 'button', onclick: () => gonder({ t: 'oldur', id: k.id }), text: 'Öldür' }),
-    );
-    islem.push(h('button', { class: 'btn btn-sm', type: 'button', onclick: () => gorunumAc(k.id), text: 'Görünüm…' }));
-    if (durum.harita && k.yerde && !k.olu && durum.sira.aktif && durum.sira.sirada === k.id) {
-      islem.push(h('button', { class: 'btn btn-sm', type: 'button', onclick: () => saldirt(k), text: 'Saldırt…' }));
-      if (durum.buyuler.length) islem.push(h('button', { class: 'btn btn-sm', type: 'button', onclick: () => buyuYaptir(k), text: 'Büyü yaptır…' }));
-    }
-    if (!k.npc && durum.harita && k.yerde) {
-      islem.push(h('button', { class: 'btn btn-sm btn-ghost', type: 'button', onclick: () => gonder({ t: 'haritadan_kaldir', id: k.id }), text: 'Haritadan kaldır' }));
-    }
-    if (k.npc) {
+    degisince($('#kd-islemler'), [k.id, k.ad, k.olu, k.harita, k.burada, k.npc, k.sirada, durum.sira.aktif, durum.sira.sirada, durum.buyuler.length], () => {
+      const islem = [];
       islem.push(
-        k.sirada
-          ? h('button', { class: 'btn btn-sm', type: 'button', onclick: () => gonder({ t: 'siradan_cikar', id: k.id }), text: 'Sıradan çıkar' })
-          : h('button', { class: 'btn btn-sm', type: 'button', onclick: () => gonder({ t: 'siraya_ekle', id: k.id }), text: 'Sıraya ekle' }),
+        k.olu
+          ? h('button', { class: 'btn btn-sm', type: 'button', onclick: () => gonder({ t: 'dirilt', id: k.id }), text: 'Dirilt' })
+          : h('button', { class: 'btn btn-sm btn-danger', type: 'button', onclick: () => gonder({ t: 'oldur', id: k.id }), text: 'Öldür' }),
       );
-      islem.push(
-        h('button', {
-          class: 'btn btn-sm btn-ghost',
-          type: 'button',
-          text: 'NPC\'yi sil',
-          onclick: async () => {
-            if (await onay({ baslik: `${k.ad} silinsin mi?`, metin: 'Statları ve envanteri de silinir.', dugme: 'Sil', tehlikeli: true })) gonder({ t: 'npc_sil', id: k.id });
-          },
+      islem.push(h('button', { class: 'btn btn-sm', type: 'button', onclick: () => gorunumAc(k.id), text: 'Görünüm…' }));
+      if (k.harita && !k.burada) islem.push(h('button', { class: 'btn btn-sm', type: 'button', onclick: () => haritasinaGit(k), text: 'Haritasına git' }));
+      if (k.burada && !k.olu && durum.sira.aktif && durum.sira.sirada === k.id) {
+        islem.push(h('button', { class: 'btn btn-sm', type: 'button', onclick: () => saldirt(k), text: 'Saldırt…' }));
+        if (durum.buyuler.length) islem.push(h('button', { class: 'btn btn-sm', type: 'button', onclick: () => buyuYaptir(k), text: 'Büyü yaptır…' }));
+      }
+      if (k.npc && k.burada && !k.olu) islem.push(h('button', { class: 'btn btn-sm', type: 'button', onclick: () => takasYaptir(k), text: 'Takas…' }));
+      if (!k.npc && k.harita) {
+        islem.push(h('button', { class: 'btn btn-sm btn-ghost', type: 'button', onclick: () => gonder({ t: 'haritadan_kaldir', id: k.id }), text: 'Haritadan kaldır' }));
+      }
+      if (k.npc) {
+        islem.push(
+          k.sirada
+            ? h('button', { class: 'btn btn-sm', type: 'button', onclick: () => gonder({ t: 'siradan_cikar', id: k.id }), text: 'Sıradan çıkar' })
+            : h('button', { class: 'btn btn-sm', type: 'button', onclick: () => gonder({ t: 'siraya_ekle', id: k.id }), text: 'Sıraya ekle' }),
+        );
+        islem.push(
+          h('button', {
+            class: 'btn btn-sm btn-ghost',
+            type: 'button',
+            text: 'NPC\'yi sil',
+            onclick: async () => {
+              if (await onay({ baslik: `${k.ad} silinsin mi?`, metin: 'Statları ve envanteri de silinir.', dugme: 'Sil', tehlikeli: true })) gonder({ t: 'npc_sil', id: k.id });
+            },
+          }),
+        );
+      }
+      $('#kd-islemler').replaceChildren(...islem);
+    });
+
+    degisince($('#kd-envanter'), [k.id, k.envanter, durum.envanter_azami], () => {
+      const env = $('#kd-envanter');
+      const gruplar = grupla(k.envanter);
+      $('#kd-env-sayi').textContent = `${k.envanter.length}/${durum.envanter_azami} eşya`;
+      env.replaceChildren(
+        ...gruplar.map((g) => {
+          const e = g.esya;
+          const sonSira = g.siralar[g.siralar.length - 1];
+          const satir = h(
+            'li',
+            { class: `inv-row${e.sabit ? ' is-fixed' : ''}`, title: e.sabit ? `${e.ad}: herkeste var, bırakılamaz` : `${e.ad}: haritaya sürükleyip bırakarak yere koy ya da başka birine ver` },
+            e.url && e.gorsel && e.var ? h('img', { class: 'inv-thumb', src: e.url, alt: '' }) : h('span', { class: `inv-thumb${e.sabit ? ' is-fist' : ''}`, text: e.sabit ? '✊' : '' }),
+            h('span', { class: 'row-name', text: e.resim && !e.var ? `${e.ad} (resmi yok)` : e.ad }),
+            e.sinif ? h('span', { class: 'tag', text: e.sinif }) : null,
+            h('span', { class: 'inv-weight', text: agirlikYaz(e) }),
+            g.adet > 1 ? h('span', { class: 'inv-count', text: `×${g.adet}` }) : null,
+            e.sabit ? null : h('button', { class: 'icon-btn', type: 'button', title: 'Adını, sınıfını, ağırlığını ya da dayanıklılığını değiştir', 'aria-label': `${e.ad} düzenle`, onclick: () => esyaDuzenle(k, sonSira, e), text: '✎' }),
+            e.sabit ? null : h('button', { class: 'icon-btn', type: 'button', title: 'Bir tane al', 'aria-label': `${e.ad}: bir tane al`, onclick: () => gonder({ t: 'esya_al', karakter: k.id, sira: sonSira }), text: '−' }),
+          );
+          return e.sabit ? satir : suruklenebilir(satir, { tur: 'envanter', karakter: k.id, sira: sonSira, ad: e.ad }, e.ad);
         }),
       );
-    }
-    $('#kd-islemler').replaceChildren(...islem);
-
-    const env = $('#kd-envanter');
-    const gruplar = grupla(k.envanter);
-    $('#kd-env-sayi').textContent = `${k.envanter.length}/${durum.envanter_azami} eşya`;
-    env.replaceChildren(
-      ...gruplar.map((g) => {
-        const e = g.esya;
-        const sonSira = g.siralar[g.siralar.length - 1];
-        const satir = h(
-          'li',
-          { class: `inv-row${e.sabit ? ' is-fixed' : ''}`, title: e.sabit ? `${e.ad}: herkeste var, bırakılamaz` : `${e.ad}: haritaya sürükleyip bırakarak yere koy ya da başka birine ver` },
-          e.url && e.gorsel && e.var ? h('img', { class: 'inv-thumb', src: e.url, alt: '' }) : h('span', { class: `inv-thumb${e.sabit ? ' is-fist' : ''}`, text: e.sabit ? '✊' : '' }),
-          h('span', { class: 'row-name', text: e.resim && !e.var ? `${e.ad} (resmi yok)` : e.ad }),
-          e.sinif ? h('span', { class: 'tag', text: e.sinif }) : null,
-          h('span', { class: 'inv-weight', text: agirlikYaz(e) }),
-          g.adet > 1 ? h('span', { class: 'inv-count', text: `×${g.adet}` }) : null,
-          e.sabit ? null : h('button', { class: 'icon-btn', type: 'button', title: 'Adını, sınıfını ya da ağırlığını değiştir', 'aria-label': `${e.ad} düzenle`, onclick: () => esyaDuzenle(k, sonSira, e), text: '✎' }),
-          e.sabit ? null : h('button', { class: 'icon-btn', type: 'button', title: 'Bir tane al', 'aria-label': `${e.ad}: bir tane al`, onclick: () => gonder({ t: 'esya_al', karakter: k.id, sira: sonSira }), text: '−' }),
-        );
-        return e.sabit ? satir : suruklenebilir(satir, { tur: 'envanter', karakter: k.id, sira: sonSira, ad: e.ad }, e.ad);
-      }),
-    );
-    if (k.envanter.length <= 1) env.append(h('li', { class: 'hint', text: 'Aşağıdaki eşyalardan birine tıklayınca bu karaktere verilir; haritadaki pulunun üstüne sürükleyip bırakarak da verebilirsin.' }));
+      if (k.envanter.length <= 1) env.append(h('li', { class: 'hint', text: 'Aşağıdaki eşyalardan birine tıklayınca bu karaktere verilir; haritadaki pulunun üstüne sürükleyip bırakarak da verebilirsin.' }));
+    });
   }
 
   async function esyaDuzenle(k, sira, e) {
@@ -504,13 +555,93 @@ export function gmPaneliOlustur({ gonder, harita, gorunumAc }) {
         { ad: 'ad', etiket: 'Ad', deger: e.ad, azami: 60 },
         { ad: 'sinif', etiket: 'Sınıf', deger: e.sinif, azami: 31, oneriler: durum.siniflar },
         { ad: 'agirlik', etiket: 'Ağırlık', tur: 'sayi', deger: e.agirlik ?? 1, en: 0, ust: 1000000 },
+        { ad: 'dayaniklilik', etiket: 'Dayanıklılık (hesabını kurallar.c yapar)', tur: 'sayi', deger: e.dayaniklilik ?? 100 },
       ],
       dugme: 'Kaydet',
     });
     if (!sonuc) return;
     if (!sonuc.ad.trim()) return bildir('Eşyanın adı boş olamaz.');
     const agirlik = Number(sonuc.agirlik);
-    gonder({ t: 'esya_duzenle', karakter: k.id, sira, ad: sonuc.ad.trim(), sinif: sonuc.sinif.trim(), ...(sonuc.agirlik !== '' && Number.isFinite(agirlik) ? { agirlik: Math.max(0, agirlik) } : {}) });
+    const dayaniklilik = Number(sonuc.dayaniklilik);
+    gonder({
+      t: 'esya_duzenle',
+      karakter: k.id,
+      sira,
+      ad: sonuc.ad.trim(),
+      sinif: sonuc.sinif.trim(),
+      ...(sonuc.agirlik !== '' && Number.isFinite(agirlik) ? { agirlik: Math.max(0, agirlik) } : {}),
+      ...(sonuc.dayaniklilik !== '' && Number.isFinite(dayaniklilik) ? { dayaniklilik } : {}),
+    });
+  }
+
+  /* GM bir NPC adına bir oyuncuyla takas başlatır; takas penceresi açılır */
+  async function takasYaptir(npc) {
+    const oyuncular = durum.karakterler.filter((k) => !k.npc && !k.olu && k.harita === npc.harita);
+    if (!oyuncular.length) return bildir(`${npc.ad} ile aynı haritada takas yapacak oyuncu yok.`);
+    const sonuc = await formAc({
+      baslik: `${npc.ad} takas yapsın`,
+      metin: 'Oyuncu NPC\'yi görmeli. İki taraf da onaylayınca takas olur.',
+      alanlar: [{ ad: 'hedef', etiket: 'Kiminle', tur: 'secim', secenekler: oyuncular.map((k) => ({ deger: k.id, metin: k.ad })) }],
+      dugme: 'Takası başlat',
+    });
+    if (sonuc) gonder({ t: 'takas_baslat', yapan: npc.id, hedef: sonuc.hedef });
+  }
+
+  /* Para: altın, gümüş, bakır girdilerinden bakır toplamı */
+  for (const ad of ['altin', 'gumus', 'bakir']) {
+    $(`#kd-para-${ad}`).addEventListener('change', () => {
+      if (!secili) return;
+      gonder({ t: 'karakter_guncelle', id: secili, para: paraBirlestir($('#kd-para-altin').value, $('#kd-para-gumus').value, $('#kd-para-bakir').value) });
+    });
+  }
+
+  /* Haritada yerdeki bir eşyaya ya da bir portala tıklandı */
+  async function portalDuzenle(id) {
+    const p = harita.portal(id);
+    if (!p) return;
+    const ad = h('input', { class: 'input', value: p.ad, maxlength: 40 });
+    const hedefSec = h('select', { class: 'input' }, h('option', { value: '', text: '— hiçbir yere (kapalı) —' }), ...durum.haritalar.map((m) => h('option', { value: m.dosya, text: dosyaAdi(m.dosya) })));
+    hedefSec.value = p.hedef || '';
+    const cikis = h('select', { class: 'input' });
+    const hx = h('input', { class: 'input', type: 'number', step: 'any', value: String(p.hx ?? 0) });
+    const hy = h('input', { class: 'input', type: 'number', step: 'any', value: String(p.hy ?? 0) });
+    const konum = h('div', { class: 'row-2' }, h('label', { class: 'field' }, h('span', { class: 'field-label', text: 'Çıkış x (kare)' }), hx), h('label', { class: 'field' }, h('span', { class: 'field-label', text: 'Çıkış y (kare)' }), hy));
+    const cikislar = () => {
+      const oradaki = (durum.portal_listesi || []).filter((x) => x.harita === hedefSec.value && x.id !== id);
+      cikis.replaceChildren(h('option', { value: 'konum', text: 'Şu kareye: x, y' }), h('option', { value: 'orta', text: 'Haritanın ortasına' }), ...oradaki.map((x) => h('option', { value: `p${x.id}`, text: `“${x.ad}” portalına` })));
+      cikis.value = p.hedef === hedefSec.value ? 'konum' : oradaki.length ? `p${oradaki[0].id}` : 'orta';
+      konum.hidden = cikis.value !== 'konum';
+    };
+    hedefSec.addEventListener('change', cikislar);
+    cikis.addEventListener('change', () => {
+      konum.hidden = cikis.value !== 'konum';
+    });
+    cikislar();
+    const alan = (etiket, girdi) => h('label', { class: 'field' }, h('span', { class: 'field-label', text: etiket }), girdi);
+    const sonuc = await goster({
+      baslik: 'Portal',
+      genis: false,
+      icerik: [
+        h('p', { class: 'modal-text', text: 'Yürüyüşü bu portalda biten oyuncu hedef haritaya geçer. Oyuncular portalı görür ama nereye çıktığını bilmez.' }),
+        alan('Ad (yalnızca sen görürsün)', ad),
+        alan('Hedef harita', hedefSec),
+        alan('Nereye çıksın', cikis),
+        konum,
+      ],
+      ekDugmeler: [
+        { metin: 'Portalı sil', deger: 'sil', sinif: 'btn-danger' },
+        { metin: 'Kaydet', deger: 'kaydet', sinif: 'btn-primary' },
+      ],
+    });
+    if (sonuc === 'sil') {
+      if (await onay({ baslik: 'Portal silinsin mi?', dugme: 'Sil', tehlikeli: true })) gonder({ t: 'portal_sil', id });
+      return;
+    }
+    if (sonuc !== 'kaydet') return;
+    const ileti = { t: 'portal_guncelle', id, ad: ad.value, hedef: hedefSec.value };
+    if (cikis.value === 'konum') Object.assign(ileti, { hx: Number(hx.value) || 0, hy: Number(hy.value) || 0 });
+    else if (cikis.value.startsWith('p')) ileti.hedef_portal = Number(cikis.value.slice(1));
+    gonder(ileti);
   }
 
   /* Haritada yerdeki bir eşyaya tıklandı */
@@ -522,7 +653,7 @@ export function gmPaneliOlustur({ gonder, harita, gorunumAc }) {
   }
 
   async function buyuYaptir(a) {
-    const hedefler = durum.karakterler.filter((k) => k.yerde && !k.olu);
+    const hedefler = durum.karakterler.filter((k) => k.harita && k.harita === a.harita && !k.olu);
     const sonuc = await formAc({
       baslik: `${a.ad} büyü yapsın`,
       metin: 'GM\'in yaptırdığı büyü onay beklemez; kurallar.c\'deki buyu() hemen çağrılır.',
@@ -536,7 +667,7 @@ export function gmPaneliOlustur({ gonder, harita, gorunumAc }) {
   }
 
   async function saldirt(a) {
-    const hedefler = durum.karakterler.filter((k) => k.id !== a.id && k.yerde && !k.olu);
+    const hedefler = durum.karakterler.filter((k) => k.id !== a.id && k.harita && k.harita === a.harita && !k.olu);
     if (!hedefler.length) return bildir('Saldırılacak kimse yok.');
     const esyalar = grupla(a.envanter);
     const sonuc = await formAc({
@@ -553,6 +684,7 @@ export function gmPaneliOlustur({ gonder, harita, gorunumAc }) {
   }
 
   $('#npc-ekle').addEventListener('click', () => gonder({ t: 'npc_ekle' }));
+  suruklenebilir($('#portal-koy'), { tur: 'portal' }, 'Portal');
 
   // ------------------------------------------------------------ eşya kataloğu (sınıflara göre)
 
@@ -562,6 +694,10 @@ export function gmPaneliOlustur({ gonder, harita, gorunumAc }) {
     $('#esya-ipucu').textContent = k
       ? `Bir eşyaya tıklayınca ${k.ad} karakterine verilir. Haritaya sürükleyip bırakırsan bırakılan yerdeki karaktere gider ya da yere konur.`
       : 'Bir eşyayı haritaya sürükleyip bırak: bir karakterin üstüne bırakırsan ona gider, boş yere bırakırsan yerde durur. Bir karakter seçiliyken eşyaya tıklarsan da ona verilir.';
+    degisince(kap, [durum.esyalar, durum.siniflar, k?.id, k?.ad], () => katalogListesi(k, kap));
+  }
+
+  function katalogListesi(k, kap) {
     if (!durum.esyalar.length) {
       kap.replaceChildren(
         h('p', { class: 'hint', text: durum.siniflar.length ? `esyalar klasörü boş. "Eşya yükle" ile sınıflara (${durum.siniflar.join(', ')}) resim ekle.` : 'esyalar klasörü boş. Eşya yükle düğmesiyle resim ekle.' }),
@@ -680,7 +816,7 @@ export function gmPaneliOlustur({ gonder, harita, gorunumAc }) {
         h(
           'div',
           { class: 'req-actions' },
-          h('button', { class: 'btn btn-sm btn-ghost', type: 'button', onclick: () => harita.odakla(ist.kim), text: 'Göster' }),
+          h('button', { class: 'btn btn-sm btn-ghost', type: 'button', onclick: () => haritasinaGit(kim), text: kim && !kim.burada ? 'Haritasına git' : 'Göster' }),
           h('button', { class: 'btn btn-sm', type: 'button', onclick: reddet, text: 'Reddet' }),
           h('button', { class: `btn btn-sm ${ist.tur === 'hareket' ? 'btn-primary' : 'btn-danger-solid'}`, type: 'button', onclick: onayla, text: 'Onayla' }),
         ),
@@ -719,7 +855,7 @@ export function gmPaneliOlustur({ gonder, harita, gorunumAc }) {
     const evet = await onay({
       baslik: 'Maç sıfırlansın mı?',
       metin:
-        'NPC\'ler, oyuncuların statları, envanterleri (yumruk kalır), haritalardaki yerleri, keşifleri, yerdeki eşyalar, tur sırası ve kayıt silinir. Oyuncular, ayarlar, haritalar ve eşya resimleri kalır. Önceki hali oyun klasöründe durum-sifirlamadan-once.json olarak saklanır.',
+        'NPC\'ler, oyuncuların statları, envanterleri (yumruk kalır), paraları, haritalardaki yerleri, keşifleri, yerdeki eşyalar, takaslar, tur sırası ve kayıt silinir. Oyuncular, ayarlar, haritalar, portallar ve eşya resimleri kalır. Önceki hali oyun klasöründe durum-sifirlamadan-once.json olarak saklanır.',
       dugme: 'Maçı sıfırla',
       tehlikeli: true,
     });
@@ -769,6 +905,16 @@ export function gmPaneliOlustur({ gonder, harita, gorunumAc }) {
     ayarla(yeni) {
       durum = yeni;
       haritalariCiz();
+      if (bekleyenOdak && karakter(bekleyenOdak)?.burada) {
+        const id = bekleyenOdak;
+        bekleyenOdak = null;
+        requestAnimationFrame(() => harita.odakla(id));
+      }
+      if (bekleyenPortal && harita.portal(bekleyenPortal)) {
+        const id = bekleyenPortal;
+        bekleyenPortal = null;
+        portalDuzenle(id);
+      }
       $('#harita-gizli').checked = Boolean(durum.harita?.gizli);
       $('#harita-gizli').disabled = !durum.harita;
       $('#harita-kapat').disabled = !durum.harita;
@@ -800,5 +946,13 @@ export function gmPaneliOlustur({ gonder, harita, gorunumAc }) {
       if (durum) istekCiz();
     },
     yerEsyasiTiklandi,
+    portalTiklandi: (id) => portalDuzenle(id),
+    portalEklendi(id) {
+      bekleyenPortal = id;
+      if (harita.portal(id)) {
+        bekleyenPortal = null;
+        portalDuzenle(id);
+      }
+    },
   };
 }

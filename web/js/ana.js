@@ -1,11 +1,13 @@
-import { $, h, istek, bildir, dosyaAdi } from './ortak.js';
+import { $, h, istek, bildir, dosyaAdi, paraYaz } from './ortak.js';
 import { haritaOlustur } from './harita.js';
 import { kayitOlustur } from './kayit.js';
 import { turKartiOlustur, durumKartiCiz } from './tur.js';
 import { envanterCiz, esyaKarti, grupla } from './envanter.js';
-import { secimPenceresi } from './pencere.js';
+import { secimPenceresi, goster } from './pencere.js';
 import { zarSimgesi } from './zar-sekilleri.js';
 import { gorunumPenceresi } from './gorunum.js';
+import { takasOlustur } from './takas.js';
+import { ses, sesAcik, sesAyarla } from './ses.js';
 
 // /gm GM ekranını, kök adres oyuncu ekranını açar.
 const rol = location.pathname.replace(/\/+$/, '') === '/gm' ? 'gm' : 'oyuncu';
@@ -20,7 +22,9 @@ let okunmamis = 0;
 let siraBende = false;
 let sonIstek = null;
 let gorunumAcik = null; // açık görünüm penceresi (yeni durumda yenilenir)
-let harita, kayit, tur, gm, dosyalar;
+let ganimetAcik = null; // açık ganimet penceresi: { hedef, kap }
+let ganimetSessiz = null; // "Hepsini al" ile kapanan pencere sunucunun yanıtıyla yeniden açılmasın
+let harita, kayit, tur, gm, dosyalar, takas;
 
 function gonder(mesaj) {
   if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(mesaj));
@@ -168,32 +172,80 @@ async function yenidenDene() {
 
 // ------------------------------------------------------------ saldırı ve büyü seçimi (oyuncu)
 
-/* Bir karaktere tıklandı: başkasıysa saldır ya da büyü yap, kendisiyse büyü yap */
+/* Bir karaktere tıklandı. Ölüyse üstü aranır. Başkasıysa saldır, büyü yap ya da takas; kendisiyse büyü yap.
+   Saldırı ve büyü yalnızca kendi sıranda, takas her zaman. */
 async function etkilesimSec(hedefId) {
   if (!durum || durum.ben.gm) return;
   const hedef = harita.token(hedefId);
   if (!hedef) return;
-  const s = durum.sira;
-  if (!s.aktif) return bildir('Turlar başlamadı; sıran gelince saldırabilir ya da büyü yapabilirsin.');
-  if (!s.sirada_ben) return bildir('Sıra sende değil.');
   if (durum.olu) return bildir('Öldün; GM seni diriltebilir.');
-  if (hedef.olu) return bildir(`${hedef.ad} ölü.`);
-  if (!(durum.statlar.enerji > 0)) return bildir('Enerjin kalmadı.');
-  if (hedef.ben) return buyuSec(hedef);
+  if (hedef.olu) return gonder({ t: 'ganimet_bak', hedef: hedefId });
+  const s = durum.sira;
+  const engel = !s.aktif ? 'Turlar başlamadı.' : !s.sirada_ben ? 'Sıra sende değil.' : !(durum.statlar.enerji > 0) ? 'Enerjin kalmadı.' : null;
+  if (hedef.ben) return engel ? bildir(engel) : buyuSec(hedef);
+  const secenek = (ad, sinif, simge, baslik, alt, kapali) =>
+    h(
+      'button',
+      { class: `choice ${sinif}`, type: 'button', disabled: kapali, title: kapali || null, dataset: { secim: ad } },
+      h('span', { class: 'choice-icon', 'aria-hidden': 'true', text: simge }),
+      h('b', { text: baslik }),
+      h('small', { text: kapali || alt }),
+    );
   const secim = await secimPenceresi({
     baslik: hedef.ad,
-    icerik: (sec) => [
-      h('p', { class: 'modal-text', text: 'Ne yapacaksın? İsteğin GM\'e gider; onaylarsa olur.' }),
-      h(
+    icerik: (sec) => {
+      const satir = h(
         'div',
-        { class: 'choice-row' },
-        h('button', { class: 'choice is-attack', type: 'button', onclick: () => sec('saldir') }, h('span', { class: 'choice-icon', 'aria-hidden': 'true', text: '⚔' }), h('b', { text: 'Saldır' }), h('small', { text: 'Envanterindeki bir eşyayla' })),
-        h('button', { class: 'choice is-spell', type: 'button', onclick: () => sec('buyu') }, h('span', { class: 'choice-icon', 'aria-hidden': 'true', text: '✦' }), h('b', { text: 'Büyü yap' }), h('small', { text: 'Büyü listesinden' })),
-      ),
-    ],
+        { class: 'choice-row is-three' },
+        secenek('saldir', 'is-attack', '⚔', 'Saldır', 'Envanterindeki bir eşyayla', engel),
+        secenek('buyu', 'is-spell', '✦', 'Büyü yap', 'Büyü listesinden', engel),
+        secenek('takas', 'is-trade', '⇄', 'Takas', 'Eşya ya da para değiş', null),
+      );
+      satir.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-secim]');
+        if (b && !b.disabled) sec(b.dataset.secim);
+      });
+      return [h('p', { class: 'modal-text', text: 'Ne yapacaksın? Saldırı ve büyü GM\'in onayına gider; takası iki taraf onaylar.' }), satir];
+    },
   });
   if (secim === 'saldir') saldiriSec(hedef);
   else if (secim === 'buyu') buyuSec(hedef);
+  else if (secim === 'takas') gonder({ t: 'takas_baslat', hedef: hedefId });
+}
+
+/* Ölünün üstü: eşyaları ve parası tek tek ya da hepsi birden alınır. Sunucu her alıştan sonra yenisini gönderir. */
+function ganimetGoster(m) {
+  if (!ganimetAcik && ganimetSessiz === m.hedef) {
+    ganimetSessiz = null;
+    return;
+  }
+  const kap = ganimetAcik?.hedef === m.hedef ? ganimetAcik.kap : h('div', { class: 'loot' });
+  const al = (ek) => {
+    ses.para();
+    gonder({ t: 'ganimet_al', hedef: m.hedef, ...ek });
+  };
+  const bos = !m.envanter.length && !(m.para > 0);
+  kap.replaceChildren(
+    ...[
+      m.para > 0
+        ? h('div', { class: 'loot-coins' }, h('span', { class: 'coin-icon', 'aria-hidden': 'true', text: '◉' }), h('span', { text: paraYaz(m.para) }), h('button', { class: 'btn btn-sm', type: 'button', onclick: () => al({ para: true }), text: 'Parayı al' }))
+        : null,
+      m.envanter.length
+        ? h('ul', { class: 'item-grid pick-grid' }, ...m.envanter.map((x) => h('li', {}, esyaKarti(x.esya, { baslik: `${x.esya.ad}: al`, tikla: () => al({ sira: x.sira, ad: x.esya.ad }) }))))
+        : null,
+      h('p', { class: 'modal-text', text: bos ? 'Üstünde alınacak bir şey kalmadı.' : 'Almak istediğine tıkla.' }),
+    ].filter(Boolean),
+  );
+  $('#pencere-dugmeler [value="hepsi"]')?.toggleAttribute('hidden', bos);
+  if (ganimetAcik?.hedef === m.hedef) return;
+  ganimetAcik = { hedef: m.hedef, kap };
+  const ekDugmeler = bos ? [] : [{ metin: 'Hepsini al', deger: 'hepsi', sinif: 'btn-primary' }];
+  goster({ baslik: `${m.ad}: üstünü ara`, icerik: kap, genis: true, ekDugmeler }).then((sonuc) => {
+    if (ganimetAcik?.kap === kap) ganimetAcik = null;
+    if (sonuc !== 'hepsi') return;
+    ganimetSessiz = m.hedef;
+    al({ hepsi: true });
+  });
 }
 
 async function buyuSec(hedef) {
@@ -238,6 +290,7 @@ function kur() {
     dunya: $('#dunya'),
     resim: $('#harita-resim'),
     izgara: $('#izgara'),
+    portalKatmani: $('#portallar'),
     yerKatmani: $('#yerdekiler'),
     tokenKatmani: $('#tokenler'),
     sisTuvali: $('#sis'),
@@ -255,6 +308,23 @@ function kur() {
   harita.on('istekTasi', () => gm?.istekTasindi());
   harita.on('esyaTasi', (id, x, y) => gonder({ t: 'esya_birak', kaynak: 'yer', id, x, y }));
   harita.on('esyaTikla', (id) => gm?.yerEsyasiTiklandi(id));
+  harita.on('portalTasi', (id, x, y) => gonder({ t: 'portal_guncelle', id, x, y }));
+  harita.on('portalTikla', (id) => gm?.portalTiklandi(id));
+
+  takas = takasOlustur({ gonder });
+
+  // Ses açık / kapalı
+  const sesDugme = $('#ses');
+  const sesCiz = () => {
+    sesDugme.textContent = sesAcik() ? '🔊' : '🔇';
+    sesDugme.setAttribute('aria-pressed', String(sesAcik()));
+    sesDugme.title = sesAcik() ? 'Sesi kapat' : 'Sesi aç';
+  };
+  sesCiz();
+  sesDugme.addEventListener('click', () => {
+    sesAyarla(!sesAcik());
+    sesCiz();
+  });
 
   kayit = kayitOlustur($('#kayit'));
   tur = turKartiOlustur($('#tur-karti'), { gonder });
@@ -367,8 +437,8 @@ function bosDurum() {
     $('#bos-baslik').textContent = 'GM haritayı hazırlıyor';
     $('#bos-metin').textContent = 'Harita hazır olunca burada açılacak.';
   } else {
-    $('#bos-baslik').textContent = 'Henüz açık bir harita yok';
-    $('#bos-metin').textContent = 'GM bir harita açtığında burada belirecek. Bu arada zar atabilirsin.';
+    $('#bos-baslik').textContent = 'Henüz bir haritada değilsin';
+    $('#bos-metin').textContent = 'GM seni bir haritaya yerleştirince burada açılacak. Bu arada zar atabilirsin.';
   }
   const etiket = $('#harita-durum');
   etiket.hidden = rol !== 'gm' || !hr?.url;
@@ -389,9 +459,9 @@ function kimlerCiz() {
   );
 }
 
-// GM'in durumunda tokenler karakter listesinden gelir (haritaya yerleşmiş olanlar)
+// GM'in durumunda tokenler karakter listesinden gelir (baktığı haritadakiler)
 function normallestir(m) {
-  if (m.ben.gm) m.tokenler = m.harita ? m.karakterler.filter((k) => k.yerde).map((k) => ({ ...k, canli: true, ben: false })) : [];
+  if (m.ben.gm) m.tokenler = m.harita ? m.karakterler.filter((k) => k.burada).map((k) => ({ ...k, canli: true, ben: false })) : [];
   return m;
 }
 
@@ -410,6 +480,7 @@ function istekBildirimi(m) {
             : `${ad} → ${i.hedef_ad}: büyü isteği (${i.buyu}).`
           : `${ad} → ${i.hedef_ad}: saldırı isteği.`;
     bildir(metin, 'ok');
+    ses.istek();
     if (dar.matches && !$('#uygulama').classList.contains('show-yan')) rozet(okunmamis + 1);
   }
   sonIstek = i?.id ?? null;
@@ -437,10 +508,18 @@ function mesaj(m) {
       $('#ac-yan').classList.toggle('btn-primary', siraBende || Boolean(m.ben.gm && m.istek));
       if (!m.ben.gm) {
         durumKartiCiz($('#durum-karti'), m);
-        envanterCiz($('#envanter-liste'), m.envanter, { azami: m.envanter_azami, birak: m.ben.yerde && !m.olu ? (sira, e) => gonder({ t: 'esya_yere', sira, ad: e.ad }) : null });
+        envanterCiz($('#envanter-liste'), m.envanter, {
+          azami: m.envanter_azami,
+          birak: m.ben.yerde && !m.olu ? (sira, e) => gonder({ t: 'esya_yere', sira, ad: e.ad }) : null,
+          imha: (sira, e) => {
+            ses.kir();
+            gonder({ t: 'esya_imha', sira, ad: e.ad });
+          },
+        });
         $('#envanter-sayi').textContent = `(${m.envanter.length}/${m.envanter_azami})`;
       }
       gm?.ayarla(m);
+      takas.ayarla(m);
       if (gorunumAcik?.kapandi()) gorunumAcik = null;
       gorunumAcik?.yenile();
       baslikGuncelle();
@@ -467,10 +546,20 @@ function mesaj(m) {
     case 'olum':
       harita.olumOlayi(m);
       break;
+    case 'portal':
+      harita.portalOlayi(m);
+      break;
+    case 'ganimet':
+      ganimetGoster(m);
+      break;
+    case 'portal_eklendi':
+      gm?.portalEklendi(m.id);
+      break;
     case 'hata':
       bildir(m.metin);
       break;
     case 'bilgi':
+      if (m.metin === 'Takas tamamlandı.') ses.para();
       bildir(m.metin, 'ok');
       break;
     case 'npc_eklendi':

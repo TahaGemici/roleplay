@@ -16,8 +16,10 @@
  *   o->x, o->y                  konumu, kare biriminde (değiştirirsen taşınır)
  *   o->can, o->odak, o->zirh, o->buyu_direnci
  *   o->enerji                   aksiyon puanı; 0 olunca sıra geçer (ne kadar harcanacağını sen yazarsın)
- *   o->agirlik                  taşıdığı yük: eşyaların ağırlıkları toplamı (salt okunur)
- *   o->envanter[i]              eşyalar: .ad, .sinif, .resim, .agirlik  (i < o->envanter_adet;
+ *   o->kendi_agirligi           karakterin kendi ağırlığı (eşyasız)
+ *   o->agirlik                  toplam ağırlık: kendi ağırlığı + eşyaları (salt okunur)
+ *   o->para                     parası, bakır cinsinden (1 ALTIN = 50 GUMUS = 200 BAKIR)
+ *   o->envanter[i]              eşyalar: .ad, .sinif, .resim, .agirlik, .dayaniklilik  (i < o->envanter_adet;
  *                               envanter[0] her zaman yumruk, en fazla ENVANTER_AZAMI eşya)
  *   o->npc                      1 ise GM'in karakteri
  *
@@ -58,7 +60,7 @@ const char *const esya_siniflari[] = {
  *
  * Herkesin envanterinde baştan olan, bırakılamayan eşya (envanter[0]). saldiri() onu da alır.
  */
-const Esya yumruk = { .ad = "Yumruk", .sinif = "silah", .agirlik = 0 };
+const Esya yumruk = { .ad = "Yumruk", .sinif = "silah", .agirlik = 0, .dayaniklilik = 100 };
 
 /* ------------------------------------------------------------------ büyüler
  *

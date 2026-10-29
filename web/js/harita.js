@@ -1,6 +1,7 @@
 import { h, svg, sinirla, basHarfler, yaziRengi, azHareket, sayiYaz } from './ortak.js';
 import { sisOlustur } from './sis.js';
-import { saldiriOynat, olumOynat } from './efekt.js';
+import { saldiriOynat, olumOynat, portalOynat } from './efekt.js';
+import { ses } from './ses.js';
 
 const EN_KUCUK = 0.05;
 const EN_BUYUK = 6;
@@ -20,7 +21,7 @@ const yumusak = (p) => (p < 0.5 ? 2 * p * p : 1 - (-2 * p + 2) ** 2 / 2);
  * Sağ tık (dokunmatikte uzun basma) herkese işaret gösterir.
  */
 export function haritaOlustur(el) {
-  const { gorus, dunya, resim, izgara, yerKatmani, tokenKatmani, sisTuvali, katman, etiketler, efektKatmani, isaretKatmani, yakinlik } = el;
+  const { gorus, dunya, resim, izgara, portalKatmani, yerKatmani, tokenKatmani, sisTuvali, katman, etiketler, efektKatmani, isaretKatmani, yakinlik } = el;
   const gor = { olcek: 1, tx: 0, ty: 0 };
   let durum = null;
   let harita = null; // görünür harita (gizliyse null)
@@ -34,8 +35,10 @@ export function haritaOlustur(el) {
   const istekAyar = new Map(); // GM: istek kimliği → düzeltilmiş hedef
   let halkalar = true;
   let bekleyenKesif = []; // kendi yürüyüşüm sürerken gelen keşif parçaları
-  const dinleyici = { yuru() {}, tasi() {}, sec() {}, isaret() {}, etkiles() {}, istekTasi() {}, esyaTasi() {}, esyaTikla() {} };
+  const dinleyici = { yuru() {}, tasi() {}, sec() {}, isaret() {}, etkiles() {}, istekTasi() {}, esyaTasi() {}, esyaTikla() {}, portalTasi() {}, portalTikla() {} };
   const yerdekiler = new Map(); // yerdeki eşyalar: id → { veri, el }
+  const portallar = new Map(); // portallar: id → { veri, el }
+  let bekleyenDurum = null; // portaldan geçerken yeni harita, kendi yürüyüşüm bitince açılır
   const sonSaldiri = new Map(); // id → saldırı animasyonunun bittiği an (ölüm ondan sonra oynasın)
   const sis = sisOlustur(sisTuvali);
 
@@ -53,6 +56,9 @@ export function haritaOlustur(el) {
   }
   const kutu = () => gorus.getBoundingClientRect();
 
+  /* Oyuncu sisli haritada haritanın ne kadar büyük olduğunu bilmez: "sığdır" kendi pulunu görüş menziline göre ortalar */
+  const siskapali = () => gm() || !harita?.izgara?.sis;
+
   function sigdir() {
     const r = kutu();
     if (!boyut.w || r.width < 10 || r.height < 10) {
@@ -60,6 +66,14 @@ export function haritaOlustur(el) {
       return;
     }
     sigdirBekliyor = false;
+    if (!siskapali()) {
+      const t = benimTokenim();
+      const capi = Math.max(2, menzil()) * 2.6 * kare;
+      gor.olcek = sinirla(Math.min(r.width, r.height) / capi, EN_KUCUK, EN_BUYUK);
+      const p = t ? px(t.goster.x, t.goster.y) : { x: boyut.w / 2, y: boyut.h / 2 };
+      merkezle(p.x, p.y);
+      return;
+    }
     const s = sinirla(Math.min(r.width / boyut.w, r.height / boyut.h) * 0.94, EN_KUCUK, EN_BUYUK);
     gor.olcek = s;
     gor.tx = (r.width - boyut.w * s) / 2;
@@ -99,6 +113,12 @@ export function haritaOlustur(el) {
   // ------------------------------------------------------------ durum
 
   function ayarla(yeni) {
+    /* Portaldan geçerken: kendi yürüyüşüm bitmeden yeni harita açılmasın */
+    if (!yeni.ben?.gm && harita && (bekleyenDurum || (yeni.harita?.dosya !== harita.dosya && benimTokenim()?.anim))) {
+      bekleyenDurum = yeni;
+      return;
+    }
+    const portaldan = !yeni.ben?.gm && harita && yeni.harita?.dosya && yeni.harita.dosya !== harita.dosya;
     durum = yeni;
     const hr = yeni.harita?.url ? yeni.harita : null;
     if (!hr) {
@@ -109,7 +129,9 @@ export function haritaOlustur(el) {
       yakinlik.hidden = true;
       resim.removeAttribute('src');
       tokenleriKur([]);
-      yerdekileriKur([]);
+      yerdekileriKur([], true);
+      portallariKur([]);
+      gorus.classList.remove('is-fog');
       sis.ayarla({ acik: false });
       onizleme = null;
       katmanCiz();
@@ -139,9 +161,18 @@ export function haritaOlustur(el) {
       for (const t of [...tokenler.values()]) tokenSil(t, true);
       istekAyar.clear();
     }
+    gorus.classList.toggle('is-fog', !siskapali());
+    yakinlik.querySelector('[data-zoom="fit"]')?.setAttribute('title', siskapali() ? 'Haritayı ekrana sığdır' : 'Kendi puluna dön');
     tokenleriKur(yeni.tokenler || []);
-    yerdekileriKur(yeni.yerdekiler || []);
+    yerdekileriKur(yeni.yerdekiler || [], yeniDosya);
+    portallariKur(yeni.portallar || []);
     sisAyarla(yeni);
+    if (yeniDosya && !siskapali()) sigdir(); /* kendi pulumu ortala */
+    if (portaldan) {
+      ses.portal();
+      const t = benimTokenim();
+      if (t) portalOynat(efektBaglami, px(t.goster.x, t.goster.y), true);
+    }
     for (const id of istekAyar.keys()) if (yeni.istek?.id !== id) istekAyar.delete(id);
     if (!hareketEdebilir()) onizleme = null;
     katmanCiz();
@@ -228,6 +259,8 @@ export function haritaOlustur(el) {
   function tokenSil(t, hemen = false) {
     tokenler.delete(t.veri.id);
     animler.delete(t);
+    for (const y of t.alinacak || []) y.el.remove();
+    t.alinacak = null;
     if (secili === t.veri.id) sec(null, true);
     if (hemen || azHareket()) {
       t.el.remove();
@@ -256,6 +289,7 @@ export function haritaOlustur(el) {
         t.sonraki = veri;
         continue;
       }
+      if (t.veri.olu && !veri.olu && t.veri.canli !== false && veri.canli !== false) ses.iyiles(); /* dirildi: ayağa kalkar */
       t.veri = veri;
       if (surukle?.id !== veri.id) t.goster = { x: veri.x, y: veri.y };
       tokenCiz(t);
@@ -270,7 +304,7 @@ export function haritaOlustur(el) {
     }
   }
 
-  const olcek = (veri) => (Number.isFinite(veri?.olcek) ? sinirla(veri.olcek, 0.5, 2) : 1);
+  const olcek = (veri) => (Number.isFinite(veri?.olcek) ? sinirla(veri.olcek, 0.5, 2.5) : 1);
 
   function konumla(t) {
     const p = px(t.goster.x, t.goster.y);
@@ -342,15 +376,18 @@ export function haritaOlustur(el) {
     y.el.style.setProperty('--gs', `${b}px`);
     const p = px(y.goster.x, y.goster.y);
     y.el.style.transform = `translate(${p.x - b / 2}px, ${p.y - b / 2}px)`;
-    y.el.title = e.sinif ? `${e.ad} (${e.sinif})` : e.ad;
+    y.el.title = y.veri.hatira ? `${e.ad} (en son burada gördün)` : e.sinif ? `${e.ad} (${e.sinif})` : e.ad;
     y.el.classList.toggle('is-movable', gm());
+    y.el.classList.toggle('is-memory', Boolean(y.veri.hatira));
     const url = e.url && e.gorsel && e.var !== false ? e.url : null;
     resimAyarla(y.img, url);
     y.yazi.hidden = Boolean(url);
     y.yazi.textContent = basHarfler(e.ad);
   }
 
-  function yerdekileriKur(liste) {
+  /* Görünen bir eşya yerden kalkınca (biri aldı) ses çıkar; harita değişirken sessiz. Yürüyen biri yolu üstünde
+     aldıysa eşya, pul oraya varınca kalkar. */
+  function yerdekileriKur(liste, sessiz = false) {
     const gorulen = new Set();
     for (const veri of liste) {
       gorulen.add(veri.id);
@@ -366,11 +403,66 @@ export function haritaOlustur(el) {
       if (yerSurukle?.id !== veri.id) y.goster = { x: veri.x, y: veri.y };
       yerEsyasiCiz(y);
     }
+    let alindi = false;
     for (const [id, y] of [...yerdekiler]) {
       if (gorulen.has(id)) continue;
-      y.el.remove();
       yerdekiler.delete(id);
+      const alan = sessiz || y.veri.hatira ? null : [...animler].find((t) => yolUstunde(t.anim, y.veri.x, y.veri.y));
+      if (alan) {
+        alan.alinacak = [...(alan.alinacak || []), y];
+        continue;
+      }
+      if (!y.veri.hatira) alindi = true;
+      y.el.remove();
     }
+    if (alindi && !sessiz) ses.para();
+  }
+
+  // ------------------------------------------------------------ portallar
+
+  function portalCiz(p) {
+    const b = kare * 0.9;
+    p.el.style.setProperty('--ps', `${b}px`);
+    const q = px(p.goster.x, p.goster.y);
+    p.el.style.transform = `translate(${q.x - b / 2}px, ${q.y - b / 2}px)`;
+    p.el.classList.toggle('is-movable', gm());
+    p.el.classList.toggle('is-unlinked', gm() && !p.veri.hedef);
+    p.isim.textContent = gm() ? p.veri.ad : '';
+    p.el.title = gm() ? `${p.veri.ad}${p.veri.hedef ? '' : ' (bir yere bağlı değil)'}` : 'Portal';
+  }
+
+  function portallariKur(liste) {
+    const gorulen = new Set();
+    for (const veri of liste) {
+      gorulen.add(veri.id);
+      let p = portallar.get(veri.id);
+      if (!p) {
+        const isim = h('span', { class: 'portal-name' });
+        p = { veri, isim, el: h('div', { class: 'portal', dataset: { portal: String(veri.id) } }, h('span', { class: 'portal-swirl' }), isim) };
+        portallar.set(veri.id, p);
+        portalKatmani.append(p.el);
+      }
+      p.veri = veri;
+      if (portalSurukle?.id !== veri.id) p.goster = { x: veri.x, y: veri.y };
+      portalCiz(p);
+    }
+    for (const [id, p] of [...portallar]) {
+      if (gorulen.has(id)) continue;
+      p.el.remove();
+      portallar.delete(id);
+    }
+  }
+
+  /** Biri portaldan geçti: o noktada portal efekti (geçen yürüyorsa yürüyüşü bitince) */
+  function portalOlayi(m) {
+    if (!harita) return;
+    const t = tokenler.get(m.id);
+    const oynat = () => {
+      ses.portal();
+      portalOynat(efektBaglami, px(m.x, m.y), m.varis);
+    };
+    if (t?.anim && !m.varis) t.sonrakiEfekt = oynat;
+    else oynat();
   }
 
   // ------------------------------------------------------------ yürüme animasyonu
@@ -381,6 +473,7 @@ export function haritaOlustur(el) {
   function animBaslat(t, a) {
     /* Süren bir yürüyüş varsa yenisi onun bulunduğu yerden devam eder */
     t.anim = { ...a, bas: performance.now() };
+    ses.yurume(0, a.sure, t === benimTokenim() ? 1 : 0.5);
     t.el.classList.add('is-walking');
     if (a.gir) t.el.style.opacity = '0';
     animler.add(t);
@@ -395,6 +488,7 @@ export function haritaOlustur(el) {
       const once = t.goster;
       t.goster = { x: a.x1 + (a.x2 - a.x1) * e, y: a.y1 + (a.y2 - a.y1) * e };
       konumla(t);
+      if (t.alinacak) alinanlariKaldir(t, false);
       if (a.gir) t.el.style.opacity = String(Math.min(1, p * 5));
       if (a.cik && p > 0.8) t.el.style.opacity = String(Math.max(0, (1 - p) * 5));
       if (t === benimTokenim() && sis.etkin) {
@@ -408,6 +502,26 @@ export function haritaOlustur(el) {
     if (onizleme || durum?.istek) katmanCiz();
   }
 
+  /* Yürüyüş çizgisinin bir noktaya uzaklığı yeterince az mı (kare) */
+  function yolUstunde(a, x, y) {
+    const dx = a.x2 - a.x1;
+    const dy = a.y2 - a.y1;
+    const L = dx * dx + dy * dy;
+    const u = L ? sinirla(((x - a.x1) * dx + (y - a.y1) * dy) / L, 0, 1) : 0;
+    return Math.hypot(a.x1 + u * dx - x, a.y1 + u * dy - y) <= 0.75;
+  }
+
+  /* Yürüyen pul yolundaki eşyaya varınca eşya kalkar (hepsi: yürüyüş bitti, kalanlar da kalkar) */
+  function alinanlariKaldir(t, hepsi) {
+    const kalan = t.alinacak.filter((y) => {
+      if (!hepsi && Math.hypot(t.goster.x - y.veri.x, t.goster.y - y.veri.y) > 0.6) return true;
+      y.el.remove();
+      ses.para();
+      return false;
+    });
+    t.alinacak = kalan.length ? kalan : null;
+  }
+
   function animBitir(t, dogal) {
     animler.delete(t);
     const a = t.anim;
@@ -415,6 +529,20 @@ export function haritaOlustur(el) {
     t.el.classList.remove('is-walking');
     t.el.style.opacity = '';
     if (dogal && a) t.goster = { x: a.x2, y: a.y2 };
+    if (t.alinacak) alinanlariKaldir(t, true);
+    if (t.sonrakiEfekt) {
+      const fn = t.sonrakiEfekt;
+      t.sonrakiEfekt = null;
+      fn();
+    }
+    if (t === benimTokenim() && bekleyenDurum) {
+      const d = bekleyenDurum;
+      bekleyenDurum = null;
+      animler.delete(t);
+      t.anim = null;
+      ayarla(d);
+      return;
+    }
     if (t.kaldir) {
       tokenSil(t, a?.cik);
       return;
@@ -530,10 +658,13 @@ export function haritaOlustur(el) {
     return !gm() && Boolean(harita && benimTokenim()) && !durum.olu && durum.sira.aktif && durum.sira.sirada_ben && (durum.statlar?.enerji ?? 0) > 0;
   }
 
-  /** Kare koordinatını harita içine alır; "kare ortasına otursun" açıksa kare ortasına oturtur. */
+  /** Kare koordinatını harita içine alır; "kare ortasına otursun" açıksa kare ortasına oturtur. Sisli haritada
+      oyuncunun hedefi kenara yapışmaz (haritanın sınırını belli etmesin); sunucu yine de içeri alır. */
   function oturtulmus({ x, y }) {
-    const ortala = (v, ust) => (harita.izgara.oturt ? Math.min(Math.floor(v), Math.max(0, Math.floor(ust) - 1)) + 0.5 : v);
-    return { x: ortala(sinirla(x, 0, harita.genislik), harita.genislik), y: ortala(sinirla(y, 0, harita.yukseklik), harita.yukseklik) };
+    const sinirli = siskapali();
+    const ortala = (v, ust) => (harita.izgara.oturt ? (sinirli ? Math.min(Math.floor(v), Math.max(0, Math.floor(ust) - 1)) : Math.floor(v)) + 0.5 : v);
+    const al = (v, ust) => (sinirli ? sinirla(v, 0, ust) : v);
+    return { x: ortala(al(x, harita.genislik), harita.genislik), y: ortala(al(y, harita.yukseklik), harita.yukseklik) };
   }
 
   /** Oyuncunun imleç noktasına göre gideceği yer ve oraya uzaklığı (kare). Enerjiyi kurallar.c belirler. */
@@ -632,6 +763,7 @@ export function haritaOlustur(el) {
 
   function isaretGoster({ x, y, renk, ad, odak }) {
     if (odak) merkezle(x, y);
+    ses.isaret();
     const e = h(
       'div',
       { class: 'ping', vars: { '--pc': renk } },
@@ -651,6 +783,7 @@ export function haritaOlustur(el) {
   let kaydir = null;
   let surukle = null;
   let yerSurukle = null; // GM yerdeki bir eşyayı sürüklüyor
+  let portalSurukle = null; // GM bir portalı sürüklüyor
   let hayalet = null;
   let kistir = null;
   let bas = null;
@@ -679,10 +812,17 @@ export function haritaOlustur(el) {
     const ghost = e.button === 0 && gm() ? e.target.closest?.('[data-istek]') : null;
     const t = e.button === 0 ? canliToken(e.target) : null;
     const yerEl = e.button === 0 && gm() && !t ? e.target.closest?.('.ground-item') : null;
+    const portalEl = e.button === 0 && gm() && !t && !yerEl ? e.target.closest?.('.portal') : null;
     bas = { x: e.clientX, y: e.clientY, id: t ? t.veri.id : null, kaydi: false };
     if (ghost) {
       kip = 'hayalet';
       hayalet = { id: Number(ghost.dataset.istek) };
+    } else if (portalEl && portallar.has(Number(portalEl.dataset.portal))) {
+      const p = portallar.get(Number(portalEl.dataset.portal));
+      const q = dunyaya(e.clientX, e.clientY);
+      const kp = px(p.goster.x, p.goster.y);
+      portalSurukle = { id: p.veri.id, dx: q.x - kp.x, dy: q.y - kp.y };
+      kip = 'portal';
     } else if (yerEl && yerdekiler.has(Number(yerEl.dataset.yer))) {
       const y = yerdekiler.get(Number(yerEl.dataset.yer));
       const p = dunyaya(e.clientX, e.clientY);
@@ -709,6 +849,7 @@ export function haritaOlustur(el) {
           kip = null;
           surukle = null;
           yerSurukle = null;
+          portalSurukle = null;
           hayalet = null;
         }
       }, UZUN_BASMA_MS);
@@ -758,6 +899,13 @@ export function haritaOlustur(el) {
       t.goster = kareye(p.x - surukle.dx, p.y - surukle.dy);
       konumla(t);
       katmanCiz();
+    } else if (kip === 'portal') {
+      const p = portallar.get(portalSurukle.id);
+      if (!p) return;
+      const q = dunyaya(e.clientX, e.clientY);
+      p.el.classList.add('is-dragging');
+      p.goster = kareye(q.x - portalSurukle.dx, q.y - portalSurukle.dy);
+      portalCiz(p);
     } else if (kip === 'yer') {
       const y = yerdekiler.get(yerSurukle.id);
       if (!y) return;
@@ -805,6 +953,20 @@ export function haritaOlustur(el) {
         }
       }
     }
+    if (kip === 'portal' && portalSurukle) {
+      const p = portallar.get(portalSurukle.id);
+      if (p) {
+        p.el.classList.remove('is-dragging');
+        if (bas?.kaydi && e.type === 'pointerup') {
+          p.goster = oturtulmus(p.goster);
+          dinleyici.portalTasi(p.veri.id, p.goster.x, p.goster.y);
+        } else {
+          p.goster = { x: p.veri.x, y: p.veri.y };
+          if (e.type === 'pointerup' && bas && !bas.kaydi) dinleyici.portalTikla(p.veri.id);
+        }
+        portalCiz(p);
+      }
+    }
     if (kip === 'yer' && yerSurukle) {
       const y = yerdekiler.get(yerSurukle.id);
       if (y) {
@@ -820,11 +982,12 @@ export function haritaOlustur(el) {
         yerEsyasiCiz(y);
       }
     }
-    if (e.type === 'pointerup' && bas && !bas.kaydi && kip !== 'hayalet' && kip !== 'yer') dokun(e, bas);
+    if (e.type === 'pointerup' && bas && !bas.kaydi && kip !== 'hayalet' && kip !== 'yer' && kip !== 'portal') dokun(e, bas);
     gorus.classList.remove('is-panning');
     kip = null;
     surukle = null;
     yerSurukle = null;
+    portalSurukle = null;
     hayalet = null;
     kaydir = null;
     bas = null;
@@ -883,6 +1046,15 @@ export function haritaOlustur(el) {
         yerEsyasiCiz(y);
       }
       yerSurukle = null;
+    }
+    if (kip === 'portal' && portalSurukle) {
+      const p = portallar.get(portalSurukle.id);
+      if (p) {
+        p.el.classList.remove('is-dragging');
+        p.goster = { x: p.veri.x, y: p.veri.y };
+        portalCiz(p);
+      }
+      portalSurukle = null;
     }
     hayalet = null;
     gorus.classList.remove('is-panning');
@@ -961,6 +1133,7 @@ export function haritaOlustur(el) {
     yuruOlayi,
     saldiriOlayi,
     olumOlayi,
+    portalOlayi,
     sec,
     odakla,
     on(olay, fn) {
@@ -968,6 +1141,7 @@ export function haritaOlustur(el) {
     },
     token: (id) => tokenler.get(id)?.veri ?? null,
     yerEsyasi: (id) => yerdekiler.get(id)?.veri ?? null,
+    portal: (id) => portallar.get(id)?.veri ?? null,
     /** Ekrandaki noktanın haritadaki yeri, kare cinsinden (harita yoksa null) */
     kareKonumu(cx, cy) {
       if (!harita) return null;

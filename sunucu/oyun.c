@@ -36,13 +36,22 @@ int tur_sayisi;
 #define AZAMI_KAYIT 200
 #define AZAMI_SIRA 128
 #define AZAMI_YER_ESYASI 500 /* harita başına yerdeki eşya */
+#define AZAMI_PORTAL 100     /* harita başına portal */
+#define AZAMI_BILINEN_ESYA 1000
+#define AZAMI_TAKAS 64
+#define TAKAS_YUVA 4         /* takasta bir tarafın koyabileceği eşya çeşidi (para dahil) */
+#define AZAMI_PARA 2000000000
 #define AZAMI_KESIF 4000
 #define AZAMI_IZIN 512
 #define AZAMI_STAT 1000000.0
 #define AZAMI_GORUS 1000.0
 #define VARSAYILAN_GORUS 6.0f
 #define VARSAYILAN_CAN 10.0f
-#define ALMA_MESAFESI 0.5    /* yürüyüşü yerdeki eşyaya bu kadar kare yakın biten onu alır */
+#define VARSAYILAN_AGIRLIK 70.0f /* karakterin kendi ağırlığı; pul bu ağırlıkta 1 kat */
+#define VARSAYILAN_DAYANIKLILIK 100.0f
+#define ALMA_MESAFESI 0.5    /* yürüyüşü yerdeki eşyanın bu kadar kare yakınından geçen onu alır */
+#define PORTAL_MESAFESI 0.5  /* yürüyüşü portala bu kadar kare yakın biten portaldan geçer */
+#define YAGMA_MESAFESI 1.6   /* ölünün üstünü arayan ona en fazla bu kadar kare uzakta olmalı */
 #define BIRAKMA_MESAFESI 0.55 /* GM bir eşyayı tokenın merkezine bu kadar yakın bırakırsa eşya ona gider */
 #define AZAMI_HARITA 1000.0   /* haritanın bir kenarı en fazla bu kadar kare */
 #define VARSAYILAN_KARE_PX 70 /* boyutu seçilmemiş haritada bir karenin piksel boyu */
@@ -64,17 +73,12 @@ typedef struct {
     int gizli;    /* NPC: oyunculardan gizli */
     int olu;
     int baglanti; /* oyuncu: açık bağlantı sayısı (kaydedilmez) */
-    int yerde;    /* oyuncu: açık haritaya yerleştirildi mi (GM yerleştirir; kaydedilmez, konumdan gelir) */
-    char *harita; /* NPC: bulunduğu harita (haritalar/ altında göreli yol) */
+    char *harita; /* bulunduğu harita (haritalar/ altında göreli yol); NULL: hiçbir haritada değil. Oyuncuları GM
+                     yerleştirir; her oyuncu ayrı bir haritada olabilir. */
     char resim[256]; /* tokenın resmi: "tokenlar/..." ya da "" */
     char sapka[256]; /* tokenın şapkası: "sapkalar/..." ya da "" */
     Oyuncu o;
 } Karakter;
-
-typedef struct {
-    char oyuncu[ID_N];
-    float x, y;
-} Konum; /* oyuncunun bir haritadaki yeri */
 
 typedef struct {
     char id[ID_N];
@@ -83,12 +87,20 @@ typedef struct {
 } Bilinen; /* bir oyuncunun başka bir karakteri en son nerede gördüğü */
 
 typedef struct {
+    long long id;
+    float x, y;
+    Esya e;
+} BilinenEsya; /* bir oyuncunun yerde görüp hatırladığı eşya (o sırada alınmış olabilir) */
+
+typedef struct {
     char oyuncu[ID_N];
     Kapsul *kesif; /* keşfedilen alan: görüş dairesinin taradığı kapsüller */
     int kesif_n, kesif_kap;
     long long kesif_surum;
     Bilinen *bilinen;
     int bilinen_n;
+    BilinenEsya *esya;
+    int esya_n;
 } Bilgi; /* bir oyuncunun bir haritadaki hafızası */
 
 typedef struct {
@@ -96,6 +108,14 @@ typedef struct {
     Esya e;
     float x, y;
 } YerEsyasi; /* haritada yerde duran eşya */
+
+typedef struct {
+    long long id;
+    char ad[64];
+    float x, y;
+    char *hedef;  /* hedef harita (haritalar/ altında göreli yol); NULL: bir yere bağlı değil */
+    float hx, hy; /* hedef haritada varılan yer */
+} Portal; /* GM'in koyduğu geçit: içine yürüyen oyuncu hedef haritaya geçer */
 
 typedef struct {
     double genislik, yukseklik; /* GM'in seçtiği boyut, kare cinsinden (0: henüz seçilmedi) */
@@ -109,12 +129,13 @@ typedef struct {
     char *dosya; /* haritalar/ altında göreli yol */
     long long no; /* bu çalıştırmadaki kimliği (kaydedilmez) */
     Izgara iz;
-    Konum *konum;
-    int konum_n;
+    int gizli; /* oyunculardan gizli (GM hazırlıyor) */
     Bilgi *bilgi;
     int bilgi_n;
     YerEsyasi *yer;
     int yer_n;
+    Portal *portal;
+    int portal_n;
     long long g_mtime, g_boyut; /* görselin piksel boyutu önbelleği (kaydedilmez) */
     int gen, yuk;
 } HaritaKaydi;
@@ -171,7 +192,21 @@ typedef struct {
     char oyuncu[ID_N];
     char resim[256];
     long long bitis;
-} ResimIzni; /* saldırı animasyonunda başkasının eşya resmini görebilsin diye kısa süreli izin */
+} ResimIzni;
+
+typedef struct {
+    int tur;  /* 0: boş, 1: eşya, 2: para */
+    Esya e;   /* eşyanın türü: bu türden adet tanesi verilir */
+    int adet;
+    int para; /* bakır */
+} TakasYuvasi;
+
+typedef struct {
+    long long id;
+    char kim[2][ID_N]; /* [0] başlatan, [1] karşı taraf */
+    TakasYuvasi yuva[2][TAKAS_YUVA];
+    int onay[2];
+} Takas; /* iki karakter arasında süren takas (kaydedilmez) */ /* saldırı animasyonunda başkasının eşya resmini görebilsin diye kısa süreli izin */
 
 /* Oyuncu'nun konum dışındaki float statları. Durum, kayıt, GM düzenlemesi ve kurallardan sonraki
    onarım bu tek listeyi kullanır. */
@@ -189,6 +224,7 @@ static const StatAlani STATLAR[] = {
     STAT_ALANI(zirh, "zırh", -AZAMI_STAT, AZAMI_STAT),
     STAT_ALANI(buyu_direnci, "büyü direnci", -AZAMI_STAT, AZAMI_STAT),
     STAT_ALANI(enerji, "enerji", -AZAMI_STAT, AZAMI_STAT),
+    STAT_ALANI(kendi_agirligi, "kendi ağırlığı", 0, AZAMI_STAT),
 };
 
 static float *stat_yeri(Oyuncu *o, const StatAlani *a)
@@ -207,11 +243,13 @@ static struct {
     int kar_n;
     HaritaKaydi *harita;
     int harita_n;
-    char *aktif; /* açık harita, yoksa NULL */
-    int gizli;   /* harita oyunculardan gizli mi */
+    char *aktif; /* GM'in baktığı harita, yoksa NULL. Oyuncular kendi haritalarındadır; GM'in bakışı onları taşımaz. */
     Sira sira;
     Istek istek; /* bekleyen tek istek: yalnızca sırası gelen karakter istekte bulunabilir */
     int istek_var;
+    Takas takas[AZAMI_TAKAS];
+    int takas_n;
+    long long takas_sayac;
     long long istek_sayac;
     Oturum oturum[AZAMI_OTURUM];
     int oturum_n;
@@ -220,7 +258,7 @@ static struct {
     ResimIzni izin[AZAMI_IZIN];
     int izin_n;
     long long sayac;
-    long long yer_sayac; /* yerdeki eşyaların kimlikleri (kaydedilmez) */
+    long long yer_sayac; /* yerdeki eşyaların ve portalların kimlikleri */
     int kirli;
 } O;
 
@@ -240,7 +278,9 @@ static void siradan_cikar(const char *id);
 static void onbellegi_bosalt(void);
 static void yumruk_ver(Oyuncu *o);
 static void agirlik_hesapla(Oyuncu *o);
-static void yerden_al(Karakter *k);
+static void yerden_al(Karakter *k, double ax, double ay);
+static void takaslari_bitir(const char *kim, const char *neden);
+static void takaslar_yaz(Buf *b, const Karakter *ben);
 
 /* ================================================================== yardımcılar */
 
@@ -450,13 +490,28 @@ static int oyuncu_sayisi(void)
     return n;
 }
 
-/* Açık haritada mı? Oyuncuları GM haritaya yerleştirir (her haritada ayrı bir yerleri olur); NPC'ler tek bir
-   haritaya aittir. */
+/* Bir haritada mı (oyuncuları GM yerleştirir; NPC'ler hep bir haritadadır) */
 static int haritada(const Karakter *k)
 {
-    if (!O.aktif) return 0;
-    if (!k->npc) return k->yerde;
-    return k->harita && !strcmp(k->harita, O.aktif);
+    return k->harita != NULL;
+}
+
+/* Verilen haritada mı */
+static int bu_haritada(const Karakter *k, const char *dosya)
+{
+    return k->harita && dosya && !strcmp(k->harita, dosya);
+}
+
+/* İkisi aynı haritada mı */
+static int ayni_haritada(const Karakter *a, const Karakter *b)
+{
+    return a->harita && bu_haritada(b, a->harita);
+}
+
+/* GM'in baktığı haritada mı */
+static int gm_haritasinda(const Karakter *k)
+{
+    return bu_haritada(k, O.aktif);
 }
 
 /* Herkesin görüş menzili (kare): GM Ayarlar'dan belirler. */
@@ -465,16 +520,11 @@ static float gorus_menzili(void)
     return O.ayar.gorus;
 }
 
-/* Şu anki sahnenin parçası mı (oyuncular her zaman) */
-static int sahnede(const Karakter *k)
-{
-    return !k->npc || haritada(k);
-}
-
+/* GM'in baktığı haritadaki NPC'ler */
 static int haritadaki_npc_sayisi(void)
 {
     int n = 0;
-    for (int i = 0; i < O.kar_n; i++) n += O.kar[i]->npc && haritada(O.kar[i]);
+    for (int i = 0; i < O.kar_n; i++) n += O.kar[i]->npc && gm_haritasinda(O.kar[i]);
     return n;
 }
 
@@ -503,6 +553,7 @@ static Karakter *karakter_olustur(int npc, const char *id, const char *ad, const
     k->o.npc = npc;
     k->o.can = VARSAYILAN_CAN;
     k->o.enerji = O.ayar.tur_enerjisi;
+    k->o.kendi_agirligi = VARSAYILAN_AGIRLIK;
     yumruk_ver(&k->o);
     agirlik_hesapla(&k->o);
     O.kar = xrealloc(O.kar, (size_t)(O.kar_n + 1) * sizeof *O.kar);
@@ -527,17 +578,8 @@ static void karakter_kaldir(Karakter *k)
     }
     istekleri_temizle(id);
     hedef_istegini_dusur(id);
-    if (!k->npc) {
-        for (int i = 0; i < O.harita_n; i++) {
-            HaritaKaydi *h = &O.harita[i];
-            for (int j = 0; j < h->konum_n; j++) {
-                if (strcmp(h->konum[j].oyuncu, id)) continue;
-                h->konum[j] = h->konum[--h->konum_n];
-                break;
-            }
-        }
-        bilgileri_sil(id, NULL);
-    }
+    takaslari_bitir(id, "Takas bitti: karşı taraf oyundan çıktı.");
+    if (!k->npc) bilgileri_sil(id, NULL);
     bilgileri_sil(NULL, id);
     free(k->harita);
     free(k);
@@ -554,6 +596,7 @@ static void esya_doldur(Esya *e, const char *ad, const char *sinif, const char *
     kirp_onar(e->sinif, sizeof e->sinif, sinif);
     kirp_onar(e->resim, sizeof e->resim, resim);
     e->agirlik = 1;
+    e->dayaniklilik = VARSAYILAN_DAYANIKLILIK;
 }
 
 /* kurallar.c'deki yumruk tanımının bir kopyası (dizgileri NUL ile bitmese de güvenle okunur) */
@@ -566,6 +609,7 @@ static void yumruk_kopyasi(Esya *e)
     ad[sizeof yumruk.ad] = sinif[sizeof yumruk.sinif] = resim[sizeof yumruk.resim] = '\0';
     esya_doldur(e, ad[0] ? ad : "Yumruk", sinif, resim);
     e->agirlik = (float)sinirla_d(yumruk.agirlik, 0, AZAMI_STAT);
+    e->dayaniklilik = (float)sinirla_d(yumruk.dayaniklilik, -AZAMI_STAT, AZAMI_STAT);
     e->sabit = 1;
 }
 
@@ -600,15 +644,16 @@ static void yumruk_ver(Oyuncu *o)
         o->envanter[0] = y;
         kirlet();
     } else if (!esya_esit(&o->envanter[0], &y) || o->envanter[0].agirlik != y.agirlik) {
+        y.dayaniklilik = o->envanter[0].dayaniklilik; /* yumruğun dayanıklılığını kurallar yönetir */
         o->envanter[0] = y;
         kirlet();
     }
 }
 
-/* Taşıdığı yük: eşyaların ağırlıkları toplamı */
+/* Toplam ağırlık: karakterin kendi ağırlığı ve eşyalarının ağırlıkları */
 static void agirlik_hesapla(Oyuncu *o)
 {
-    double t = 0;
+    double t = sinirla_d(o->kendi_agirligi, 0, AZAMI_STAT);
     for (int i = 0; i < o->envanter_adet && i < ENVANTER_AZAMI; i++) t += o->envanter[i].agirlik;
     o->agirlik = (float)sinirla_d(t, 0, AZAMI_STAT);
 }
@@ -649,6 +694,7 @@ static void envanter_onar(Oyuncu *o)
         utf8_onar(e->sinif);
         utf8_onar(e->resim);
         e->agirlik = (float)sinirla_d(e->agirlik, 0, AZAMI_STAT);
+        e->dayaniklilik = (float)sinirla_d(e->dayaniklilik, -AZAMI_STAT, AZAMI_STAT);
     }
     yumruk_ver(o);
     agirlik_hesapla(o);
@@ -699,13 +745,29 @@ static HaritaKaydi *harita_bul(const char *dosya, int olustur)
     return h;
 }
 
-/* Açık haritanın kaydı her zaman vardır (harita açılırken oluşturulur). */
+/* GM'in baktığı haritanın kaydı (harita açılırken oluşturulur). */
 static HaritaKaydi *aktif_harita(void)
 {
     return O.aktif ? harita_bul(O.aktif, 0) : NULL;
 }
 
-/* Açık haritayı değiştirir (NULL: harita yok). */
+/* Karakterin bulunduğu haritanın kaydı */
+static HaritaKaydi *haritasi(const Karakter *k)
+{
+    return k->harita ? harita_bul(k->harita, 0) : NULL;
+}
+
+/* Karakteri bir haritaya koyar (NULL: hiçbir haritada değil). */
+static void harita_ata(Karakter *k, const char *dosya)
+{
+    if (dosya && k->harita && !strcmp(k->harita, dosya)) return;
+    char *yeni = dosya ? xstrdup(dosya) : NULL; /* dosya k->harita'nın kendisi olabilir */
+    free(k->harita);
+    k->harita = yeni;
+    kirlet();
+}
+
+/* GM'in baktığı haritayı değiştirir (NULL: harita yok). */
 static void aktif_degistir(const char *dosya)
 {
     char *yeni = dosya ? xstrdup(dosya) : NULL; /* dosya O.aktif'in kendisi olabilir */
@@ -754,26 +816,6 @@ static int harita_olcu(HaritaKaydi *h, float *g, float *y)
     return 1;
 }
 
-static Konum *konum_bul(HaritaKaydi *h, const char *oyuncu)
-{
-    for (int i = 0; i < h->konum_n; i++)
-        if (!strcmp(h->konum[i].oyuncu, oyuncu)) return &h->konum[i];
-    return NULL;
-}
-
-static void konum_yaz(HaritaKaydi *h, const char *oyuncu, float x, float y)
-{
-    Konum *k = konum_bul(h, oyuncu);
-    if (!k) {
-        h->konum = xrealloc(h->konum, (size_t)(h->konum_n + 1) * sizeof *h->konum);
-        k = &h->konum[h->konum_n++];
-        kopyala(k->oyuncu, sizeof k->oyuncu, oyuncu);
-    }
-    if (k->x != x || k->y != y) kirlet();
-    k->x = x;
-    k->y = y;
-}
-
 /* Hedefi harita içine alır; "kare ortasına otursun" açıksa en yakın karenin ortasına oturtur. */
 static void hedefe_oturt(const HaritaKaydi *h, double *x, double *y, float g, float yk)
 {
@@ -786,8 +828,7 @@ static void hedefe_oturt(const HaritaKaydi *h, double *x, double *y, float g, fl
     *y = (cy >= ky ? ky - 1 : cy) + 0.5;
 }
 
-/* Ortadan başlayıp dışa doğru boş bir kare ortası arar. Yeri belli olan (haritadaki NPC'ler ve bu
-   haritada konumu kayıtlı oyuncular) karakterlere 0.75 kareden fazla yaklaşmaz. */
+/* Ortadan başlayıp dışa doğru boş bir kare ortası arar. O haritadaki karakterlere 0.75 kareden fazla yaklaşmaz. */
 static void bos_yer(HaritaKaydi *h, float g, float y, float *ox, float *oy)
 {
     int kg = (int)g, ky = (int)y;
@@ -805,18 +846,7 @@ static void bos_yer(HaritaKaydi *h, float g, float y, float *ox, float *oy)
                 int dolu = 0;
                 for (int i = 0; i < O.kar_n && !dolu; i++) {
                     Karakter *k = O.kar[i];
-                    float kx, kyy;
-                    if (k->npc) {
-                        if (!haritada(k)) continue;
-                        kx = k->o.x;
-                        kyy = k->o.y;
-                    } else {
-                        Konum *kn = konum_bul(h, k->id);
-                        if (!kn) continue;
-                        kx = kn->x;
-                        kyy = kn->y;
-                    }
-                    if (mesafe(px, py, kx, kyy) < 0.75) dolu = 1;
+                    if (bu_haritada(k, h->dosya) && mesafe(px, py, k->o.x, k->o.y) < 0.75) dolu = 1;
                 }
                 if (!dolu) {
                     *ox = (float)px;
@@ -830,34 +860,14 @@ static void bos_yer(HaritaKaydi *h, float g, float y, float *ox, float *oy)
     *oy = cy + 0.5f;
 }
 
-static void konum_sil(HaritaKaydi *h, const char *oyuncu)
+/* Haritadaki herkes harita sınırları içinde kalsın (harita boyutu değişince). */
+static void sinirlara_al(HaritaKaydi *h)
 {
-    for (int i = 0; i < h->konum_n; i++) {
-        if (strcmp(h->konum[i].oyuncu, oyuncu)) continue;
-        h->konum[i] = h->konum[--h->konum_n];
-        kirlet();
-        return;
-    }
-}
-
-/* Haritaya yerleşmiş oyuncuların açık haritadaki yerlerini o haritanın kaydına yazar. */
-static void konumlari_kaydet(void)
-{
-    HaritaKaydi *h = aktif_harita();
-    if (!h) return;
-    for (int i = 0; i < O.kar_n; i++)
-        if (!O.kar[i]->npc && O.kar[i]->yerde) konum_yaz(h, O.kar[i]->id, O.kar[i]->o.x, O.kar[i]->o.y);
-}
-
-/* Açık haritadaki herkes harita sınırları içinde kalsın. */
-static void sinirlara_al(void)
-{
-    HaritaKaydi *h = aktif_harita();
     float g, y;
     if (!h || !harita_olcu(h, &g, &y)) return;
     for (int i = 0; i < O.kar_n; i++) {
         Karakter *k = O.kar[i];
-        if (!haritada(k)) continue;
+        if (!bu_haritada(k, h->dosya)) continue;
         float nx = (float)sinirla_d(k->o.x, 0, g), ny = (float)sinirla_d(k->o.y, 0, y);
         if (nx != k->o.x || ny != k->o.y) {
             k->o.x = nx;
@@ -867,49 +877,50 @@ static void sinirlara_al(void)
     }
 }
 
-/* Açık haritanın kaydından oyuncuların yerlerini okur. Bu haritada yeri olmayan oyuncu haritada değildir;
-   GM onu sürükleyip bırakarak yerleştirir. */
-static void konumlari_yukle(void)
-{
-    HaritaKaydi *h = aktif_harita();
-    float g, y;
-    int olcu = h && harita_olcu(h, &g, &y);
-    for (int i = 0; i < O.kar_n; i++) {
-        Karakter *k = O.kar[i];
-        if (k->npc) continue;
-        Konum *kn = olcu ? konum_bul(h, k->id) : NULL;
-        k->yerde = kn != NULL;
-        if (kn) {
-            k->o.x = kn->x;
-            k->o.y = kn->y;
-        }
-    }
-    sinirlara_al();
-}
-
 static void bilgi_temizle(Bilgi *b)
 {
     free(b->kesif);
     free(b->bilinen);
+    free(b->esya);
 }
 
-/* Haritanın kaydını ve üstündeki NPC'leri siler. */
+static void portallari_temizle(HaritaKaydi *h)
+{
+    for (int i = 0; i < h->portal_n; i++) free(h->portal[i].hedef);
+    free(h->portal);
+    h->portal = NULL;
+    h->portal_n = 0;
+}
+
+/* Haritanın kaydını ve üstündeki NPC'leri siler; oradaki oyuncular hiçbir haritada kalmaz. */
 static void harita_sil(HaritaKaydi *h)
 {
     char *dosya = h->dosya;
     for (int i = 0; i < O.kar_n;) {
         Karakter *k = O.kar[i];
-        if (k->npc && k->harita && !strcmp(k->harita, dosya)) {
-            karakter_kaldir(k);
-            continue;
+        if (bu_haritada(k, dosya)) {
+            if (k->npc) {
+                karakter_kaldir(k);
+                continue;
+            }
+            harita_ata(k, NULL);
         }
         i++;
     }
+    /* Başka haritalardaki portallar buraya çıkıyorsa bağlantısız kalır */
+    for (int i = 0; i < O.harita_n; i++)
+        for (int j = 0; j < O.harita[i].portal_n; j++) {
+            Portal *p = &O.harita[i].portal[j];
+            if (p->hedef && !strcmp(p->hedef, dosya)) {
+                free(p->hedef);
+                p->hedef = NULL;
+            }
+        }
     /* karakter_kaldir O.harita dizisini büyütmez; h hâlâ geçerli */
-    free(h->konum);
     for (int i = 0; i < h->bilgi_n; i++) bilgi_temizle(&h->bilgi[i]);
     free(h->bilgi);
     free(h->yer);
+    portallari_temizle(h);
     int i = (int)(h - O.harita);
     memmove(&O.harita[i], &O.harita[i + 1], (size_t)(O.harita_n - i - 1) * sizeof *O.harita);
     O.harita_n--;
@@ -1124,19 +1135,19 @@ static void kayitlari_gonder(Istemci *c)
 
 /* ================================================================== görüş ve hafıza */
 
-static int sis_acik(void)
+static int sis_acik(const HaritaKaydi *h)
 {
-    HaritaKaydi *h = aktif_harita();
     return h && h->iz.sis;
 }
 
-/* v oyuncusu t karakterini şu an görüyor mu? t açık haritada olmalı; sis açıksa v de haritaya yerleşmiş olmalı. */
+/* v oyuncusu t karakterini şu an görüyor mu? Aynı haritada olmalılar; gizli haritada kimse kimseyi göremez. */
 static int goruyor(const Karakter *v, const Karakter *t)
 {
     if (v == t) return 1;
-    if (!O.aktif || O.gizli || t->gizli || !haritada(t)) return 0;
-    if (!sis_acik()) return 1;
-    if (!haritada(v)) return 0;
+    if (t->gizli || !ayni_haritada(v, t)) return 0;
+    HaritaKaydi *h = haritasi(t);
+    if (!h || h->gizli) return 0;
+    if (!h->iz.sis) return 1;
     return mesafe(v->o.x, v->o.y, t->o.x, t->o.y) <= gorus_menzili() + 1e-4;
 }
 
@@ -1215,6 +1226,54 @@ static void bilinen_sil(Bilgi *b, const char *id)
     }
 }
 
+static int yer_esyasi_sira(const HaritaKaydi *h, long long id);
+
+static BilinenEsya *bilinen_esya_bul(Bilgi *b, long long id)
+{
+    for (int i = 0; i < b->esya_n; i++)
+        if (b->esya[i].id == id) return &b->esya[i];
+    return NULL;
+}
+
+static void bilinen_esya_yaz(Bilgi *b, const YerEsyasi *ye)
+{
+    BilinenEsya *e = bilinen_esya_bul(b, ye->id);
+    if (!e) {
+        if (b->esya_n >= AZAMI_BILINEN_ESYA) {
+            memmove(&b->esya[0], &b->esya[1], (size_t)(b->esya_n - 1) * sizeof *b->esya);
+            b->esya_n--;
+        }
+        b->esya = xrealloc(b->esya, (size_t)(b->esya_n + 1) * sizeof *b->esya);
+        e = &b->esya[b->esya_n++];
+        memset(e, 0, sizeof *e);
+        e->id = ye->id;
+        kirlet();
+    }
+    if (e->x != ye->x || e->y != ye->y || memcmp(&e->e, &ye->e, sizeof e->e)) {
+        e->x = ye->x;
+        e->y = ye->y;
+        e->e = ye->e;
+        kirlet();
+    }
+}
+
+/* v'nin görüş dairesi (ax,ay)'den (bx,by)'ye r yarıçapla taradı: oradaki yerdeki eşyalar hafızaya yazılır, orada olup
+   artık orada olmayanların hatırası silinir. Taranmayan yerlerdeki hatıralar eski haliyle kalır: biri eşyayı alsa da
+   oyuncu oraya tekrar bakana kadar eşyayı orada sanır. */
+static void esya_hafizasi_tara(Bilgi *b, const HaritaKaydi *h, double ax, double ay, double bx, double by, double r)
+{
+    for (int i = 0; i < h->yer_n; i++)
+        if (nokta_parca_mesafesi(h->yer[i].x, h->yer[i].y, ax, ay, bx, by) <= r) bilinen_esya_yaz(b, &h->yer[i]);
+    for (int i = b->esya_n - 1; i >= 0; i--) {
+        BilinenEsya *e = &b->esya[i];
+        if (nokta_parca_mesafesi(e->x, e->y, ax, ay, bx, by) > r) continue;
+        int sira = yer_esyasi_sira(h, e->id);
+        if (sira >= 0 && h->yer[sira].x == e->x && h->yer[sira].y == e->y) continue;
+        b->esya[i] = b->esya[--b->esya_n];
+        kirlet();
+    }
+}
+
 /* oyuncu verilirse onun bütün hafızasını; hedef verilirse herkesin o karaktere dair hafızasını siler. */
 static void bilgileri_sil(const char *oyuncu, const char *hedef)
 {
@@ -1234,28 +1293,28 @@ static void bilgileri_sil(const char *oyuncu, const char *hedef)
     }
 }
 
-/* Her oyuncunun hafızasını şimdiki görüşüyle güncelle:
-   - görüş alanındaki karakterlerin yeri ve durumu hafızaya yazılır,
-   - görüş alanında olan ama karakterin artık orada olmadığı hatıralar silinir,
-   - görüş alanının dışındaki hatıralara dokunulmaz (eski hali kalır). */
+/* Her oyuncunun bulunduğu haritadaki hafızasını şimdiki görüşüyle güncelle:
+   - görüş alanındaki karakterlerin ve yerdeki eşyaların yeri ve durumu hafızaya yazılır,
+   - görüş alanında olan ama artık orada olmayanların hatıraları silinir,
+   - görüş alanının dışındaki hatıralara dokunulmaz (eski hali kalır; başka haritaya gitmiş olsa da). */
 static void bilgileri_guncelle(void)
 {
-    HaritaKaydi *h = aktif_harita();
-    if (!h || !h->iz.sis || O.gizli) return; /* harita gizliyken oyuncular hiçbir şey görmez, hafızaları da değişmez */
     float r = gorus_menzili();
     for (int i = 0; i < O.kar_n; i++) {
         Karakter *v = O.kar[i];
-        if (v->npc || !v->yerde) continue;
+        if (v->npc) continue;
+        HaritaKaydi *h = haritasi(v);
+        if (!h || !h->iz.sis || h->gizli) continue; /* gizli haritada oyuncu bir şey görmez, hafızası değişmez */
         Bilgi *b = bilgi_bul(h, v->id, 1);
         kesfet(b, v->o.x, v->o.y, v->o.x, v->o.y, r);
         for (int j = 0; j < O.kar_n; j++) {
             Karakter *t = O.kar[j];
-            if (t != v && haritada(t) && goruyor(v, t)) bilinen_yaz(b, t);
+            if (t != v && goruyor(v, t)) bilinen_yaz(b, t);
         }
         for (int j = b->bilinen_n - 1; j >= 0; j--) {
             Bilinen *e = &b->bilinen[j];
             Karakter *t = karakter_bul(e->id);
-            if (!t || t == v || !haritada(t)) {
+            if (!t || t == v) {
                 b->bilinen[j] = b->bilinen[--b->bilinen_n];
                 kirlet();
                 continue;
@@ -1266,6 +1325,7 @@ static void bilgileri_guncelle(void)
                 kirlet();
             }
         }
+        esya_hafizasi_tara(b, h, v->o.x, v->o.y, v->o.x, v->o.y, r);
     }
 }
 
@@ -1319,35 +1379,38 @@ static void yuru_yaz(Buf *b, const Karakter *t, double x1, double y1, double x2,
     buf_putc(b, '}');
 }
 
-/* Karakteri (hx,hy)'ye yürütür: herkese gördüğü kadarını animasyon olarak gönderir, hafızaları ve
-   keşfedilen alanı günceller. Durum yayınını çağıran yapar. */
+static void portaldan_gec(Karakter *k);
+
+/* Karakteri kendi haritasında (hx,hy)'ye yürütür: aynı haritada olup görenlere gördüğü kadarını animasyon olarak
+   gönderir, hafızaları ve keşfedilen alanı günceller; yolunun üstündeki eşyaları alır, portalda biterse geçer.
+   Durum yayınını çağıran yapar. */
 static void hareket_uygula(Karakter *t, double hx, double hy)
 {
-    HaritaKaydi *h = aktif_harita();
+    HaritaKaydi *h = haritasi(t);
     float g, y;
-    if (!h || !haritada(t) || !harita_olcu(h, &g, &y)) return;
+    if (!h || !harita_olcu(h, &g, &y)) return;
     hx = sinirla_d(hx, 0, g);
     hy = sinirla_d(hy, 0, y);
     double ax = t->o.x, ay = t->o.y;
     if (fabs(hx - ax) < 1e-5 && fabs(hy - ay) < 1e-5) return;
-    int sis = h->iz.sis && !O.gizli;
+    int sis = h->iz.sis && !h->gizli;
+    float r = gorus_menzili();
 
     Buf b;
     buf_init(&b);
     for (Istemci *c = istemciler; c; c = c->sonraki) {
         b.len = 0;
         if (c->gm) {
+            if (!gm_haritasinda(t)) continue;
             yuru_yaz(&b, t, ax, ay, hx, hy, 0, 0);
         } else {
             Karakter *v = karakter_bul(c->oyuncu);
-            if (!v || O.gizli) continue;
+            if (!v || !ayni_haritada(v, t) || h->gizli) continue;
             if (v == t || (!sis && !t->gizli)) {
                 yuru_yaz(&b, t, ax, ay, hx, hy, 0, 0);
             } else {
                 double t0, t1;
-                if (t->gizli || !v->yerde ||
-                    !parca_daire_kesisimi(ax, ay, hx, hy, v->o.x, v->o.y, gorus_menzili(), &t0, &t1))
-                    continue;
+                if (t->gizli || !parca_daire_kesisimi(ax, ay, hx, hy, v->o.x, v->o.y, r, &t0, &t1)) continue;
                 yuru_yaz(&b, t, ax + (hx - ax) * t0, ay + (hy - ay) * t0, ax + (hx - ax) * t1, ay + (hy - ay) * t1,
                          t0 > 1e-6, t1 < 1 - 1e-6);
             }
@@ -1361,8 +1424,8 @@ static void hareket_uygula(Karakter *t, double hx, double hy)
         for (int i = 0; i < O.kar_n; i++) {
             Karakter *v = O.kar[i];
             double t0, t1;
-            if (v->npc || !v->yerde || v == t || t->gizli) continue;
-            if (!parca_daire_kesisimi(ax, ay, hx, hy, v->o.x, v->o.y, gorus_menzili(), &t0, &t1)) continue;
+            if (v->npc || v == t || t->gizli || !ayni_haritada(v, t)) continue;
+            if (!parca_daire_kesisimi(ax, ay, hx, hy, v->o.x, v->o.y, r, &t0, &t1)) continue;
             if (t1 < 1 - 1e-6) bilinen_sil(bilgi_bul(h, v->id, 1), t->id);
         }
     }
@@ -1372,23 +1435,24 @@ static void hareket_uygula(Karakter *t, double hx, double hy)
     if (sis && !t->npc) {
         /* Yürürken görüş dairesinin taradığı her yer görüldü */
         Bilgi *bl = bilgi_bul(h, t->id, 1);
-        float r = gorus_menzili();
         kesfet(bl, (float)ax, (float)ay, (float)hx, (float)hy, r);
         for (int i = 0; i < O.kar_n; i++) {
             Karakter *u = O.kar[i];
-            if (u == t || u->gizli || !haritada(u)) continue;
+            if (u == t || u->gizli || !ayni_haritada(u, t)) continue;
             if (nokta_parca_mesafesi(u->o.x, u->o.y, ax, ay, hx, hy) <= r) bilinen_yaz(bl, u);
         }
         for (int i = bl->bilinen_n - 1; i >= 0; i--) {
             Bilinen *e = &bl->bilinen[i];
             Karakter *u = karakter_bul(e->id);
             if (!u) continue;
-            int u_gorundu = !u->gizli && haritada(u) && nokta_parca_mesafesi(u->o.x, u->o.y, ax, ay, hx, hy) <= r;
+            int u_gorundu = !u->gizli && ayni_haritada(u, t) && nokta_parca_mesafesi(u->o.x, u->o.y, ax, ay, hx, hy) <= r;
             if (!u_gorundu && nokta_parca_mesafesi(e->x, e->y, ax, ay, hx, hy) <= r) bilinen_sil(bl, e->id);
         }
+        esya_hafizasi_tara(bl, h, ax, ay, hx, hy, r);
     }
     bilgileri_guncelle();
-    yerden_al(t);
+    yerden_al(t, ax, ay);
+    portaldan_gec(t);
 }
 
 /* Bir olayı kimlerin gördüğü: a ya da t'yi görenler ve a, t'nin kendileri (oyuncuysa). ",id,id," */
@@ -1420,6 +1484,8 @@ static void saldiri_yayinla(const Karakter *a, const Karakter *t, const char *re
             ga = goruyor(v, a);
             gt = goruyor(v, t);
             if (!ga && !gt) continue;
+        } else if (!gm_haritasinda(a) && !gm_haritasinda(t)) {
+            continue;
         }
         b.len = 0;
         buf_puts(&b, "{\"t\":\"saldiri\",\"saldiran\":");
@@ -1464,6 +1530,7 @@ static void oldur(Karakter *k)
     k->olu = 1;
     kirlet();
     istekleri_temizle(k->id);
+    takaslari_bitir(k->id, "Takas bitti: karşı taraf öldü.");
     Buf s, b;
     buf_init(&s);
     buf_init(&b);
@@ -1476,14 +1543,15 @@ static void oldur(Karakter *k)
     buf_putc(&b, '}');
     for (Istemci *c = istemciler; c; c = c->sonraki) {
         Karakter *v = c->gm ? NULL : karakter_bul(c->oyuncu);
-        if (c->gm || (v && goruyor(v, k))) gonder_buf(c, &b);
+        if ((c->gm && gm_haritasinda(k)) || (v && goruyor(v, k))) gonder_buf(c, &b);
     }
     buf_free(&s);
     buf_free(&b);
     bilgileri_guncelle();
 }
 
-static void isaret_yayinla(double x, double y, const char *ad, const char *renk, int odak)
+/* Haritadaki bir işaret: o haritadaki oyunculara (harita gizli değilse) ve oraya bakan GM'e */
+static void isaret_yayinla(const HaritaKaydi *h, double x, double y, const char *ad, const char *renk, int odak)
 {
     Buf b;
     buf_init(&b);
@@ -1491,8 +1559,32 @@ static void isaret_yayinla(double x, double y, const char *ad, const char *renk,
                odak ? "true" : "false", renk);
     buf_json_str(&b, ad);
     buf_putc(&b, '}');
-    for (Istemci *c = istemciler; c; c = c->sonraki)
-        if (c->gm || !O.gizli) gonder_buf(c, &b);
+    for (Istemci *c = istemciler; c; c = c->sonraki) {
+        Karakter *v = c->gm ? NULL : karakter_bul(c->oyuncu);
+        if (c->gm ? (O.aktif && !strcmp(O.aktif, h->dosya)) : (v && bu_haritada(v, h->dosya) && !h->gizli))
+            gonder_buf(c, &b);
+    }
+    buf_free(&b);
+}
+
+/* Portal efekti: bir haritada (x,y)'de; o haritada orayı görenlere ve oraya bakan GM'e. kim: geçen karakter. */
+static void portal_yayinla(const HaritaKaydi *h, const Karakter *kim, double x, double y, int varis)
+{
+    Buf b;
+    buf_init(&b);
+    buf_puts(&b, "{\"t\":\"portal\",\"id\":");
+    buf_json_str(&b, kim->id);
+    sayi_alani(&b, "x", x);
+    sayi_alani(&b, "y", y);
+    buf_printf(&b, ",\"varis\":%s}", varis ? "true" : "false");
+    for (Istemci *c = istemciler; c; c = c->sonraki) {
+        Karakter *v = c->gm ? NULL : karakter_bul(c->oyuncu);
+        int gonder;
+        if (c->gm) gonder = O.aktif && !strcmp(O.aktif, h->dosya);
+        else gonder = v && v != kim && bu_haritada(v, h->dosya) && !h->gizli &&
+                      (!h->iz.sis || mesafe(v->o.x, v->o.y, x, y) <= gorus_menzili() + 1e-4);
+        if (gonder) gonder_buf(c, &b);
+    }
     buf_free(&b);
 }
 
@@ -1561,6 +1653,7 @@ static void esya_json(Buf *b, const Esya *e)
     buf_printf(b, ",\"var\":%s,\"gorsel\":%s,\"sabit\":%s", oyun_dosyasi_var(e->resim) ? "true" : "false",
                gorsel_uzantili(e->resim) ? "true" : "false", e->sabit ? "true" : "false");
     sayi_alani(b, "agirlik", e->agirlik);
+    sayi_alani(b, "dayaniklilik", e->dayaniklilik);
     buf_putc(b, '}');
 }
 
@@ -1618,15 +1711,16 @@ static int envantere_koy(Karakter *k, const Esya *e)
     return 1;
 }
 
-/* Yürüyüşü (ya da GM'in taşıması, yerleştirmesi) yerdeki eşyaların üstünde biten karakter onları alır. */
-static void yerden_al(Karakter *k)
+/* Karakter (ax,ay)'den bulunduğu yere yürüdü (ya da konuldu: ax,ay = şimdiki yer): yolunun üstündeki yerdeki
+   eşyaları envanterine alır (yer kaldıkça). */
+static void yerden_al(Karakter *k, double ax, double ay)
 {
-    HaritaKaydi *h = aktif_harita();
-    if (!h || !haritada(k) || k->olu) return;
-    int dolu = 0;
+    HaritaKaydi *h = haritasi(k);
+    if (!h || k->olu) return;
+    int dolu = 0, aldi = 0;
     for (int i = 0; i < h->yer_n;) {
         YerEsyasi *ye = &h->yer[i];
-        if (mesafe(ye->x, ye->y, k->o.x, k->o.y) > ALMA_MESAFESI) {
+        if (nokta_parca_mesafesi(ye->x, ye->y, ax, ay, k->o.x, k->o.y) > ALMA_MESAFESI) {
             i++;
             continue;
         }
@@ -1639,35 +1733,127 @@ static void yerden_al(Karakter *k)
         snprintf(m, sizeof m, "%s yerden aldı: %s", k->ad, ye->e.ad);
         kayit_sahibe("esya", k, m);
         yerden_kaldir(h, i);
+        aldi = 1;
     }
+    if (aldi) bilgileri_guncelle(); /* alanın (ve o an görenlerin) hafızasından da düşsün */
     if (dolu && !k->npc) oyuncuya_bildir(k, "hata", "Envanterin dolu; yerdeki eşyayı alamadın.");
 }
 
-/* v oyuncusu yerdeki eşyayı görüyor mu: sis kapalıysa herkes, açıksa görüş menzilindekiler */
-static int yer_goruyor(const Karakter *v, const YerEsyasi *ye)
+/* v oyuncusu yerdeki eşyayı şu an görüyor mu: kendi haritasında; sis kapalıysa hepsini, açıksa görüş menzilindekileri */
+static int yer_goruyor(const Karakter *v, const HaritaKaydi *h, const YerEsyasi *ye)
 {
-    if (!O.aktif || O.gizli) return 0;
-    if (!sis_acik()) return 1;
-    return haritada(v) && mesafe(v->o.x, v->o.y, ye->x, ye->y) <= gorus_menzili() + 1e-4;
+    if (!h || h->gizli || !bu_haritada(v, h->dosya)) return 0;
+    if (!h->iz.sis) return 1;
+    return mesafe(v->o.x, v->o.y, ye->x, ye->y) <= gorus_menzili() + 1e-4;
 }
 
-/* ,"yerdekiler":[{"id":1,"x":..,"y":..,"esya":{...}}]  (v NULL ise GM: hepsi) */
-static void yerdekiler_yaz(Buf *b, HaritaKaydi *h, const Karakter *v)
+static void yer_esyasi_yaz(Buf *b, long long id, double x, double y, const Esya *e, int hatira, int ilk)
+{
+    buf_printf(b, "%s{\"id\":%lld,\"x\":", ilk ? "" : ",", id);
+    sayi_yaz(b, x);
+    sayi_alani(b, "y", y);
+    buf_printf(b, ",\"hatira\":%s,\"esya\":", hatira ? "true" : "false");
+    esya_json(b, e);
+    buf_putc(b, '}');
+}
+
+/* ,"yerdekiler":[{"id":1,"x":..,"y":..,"hatira":false,"esya":{...}}]
+   v NULL ise GM: haritadakilerin hepsi. Oyuncu şu an gördüklerini ve hatırladıklarını (hatira: o sırada orada
+   olmayabilir) alır. */
+static void yerdekiler_yaz(Buf *b, HaritaKaydi *h, const Karakter *v, Bilgi *bl)
 {
     buf_puts(b, ",\"yerdekiler\":[");
     int ilk = 1;
     for (int i = 0; h && i < h->yer_n; i++) {
         const YerEsyasi *ye = &h->yer[i];
-        if (v && !yer_goruyor(v, ye)) continue;
-        buf_printf(b, "%s{\"id\":%lld,\"x\":", ilk ? "" : ",", ye->id);
+        if (v && !yer_goruyor(v, h, ye)) continue;
+        yer_esyasi_yaz(b, ye->id, ye->x, ye->y, &ye->e, 0, ilk);
         ilk = 0;
-        sayi_yaz(b, ye->x);
-        sayi_alani(b, "y", ye->y);
-        buf_puts(b, ",\"esya\":");
-        esya_json(b, &ye->e);
+    }
+    for (int i = 0; v && bl && h && h->iz.sis && i < bl->esya_n; i++) {
+        const BilinenEsya *e = &bl->esya[i];
+        int sira = yer_esyasi_sira(h, e->id);
+        if (sira >= 0 && yer_goruyor(v, h, &h->yer[sira])) continue; /* zaten canlı olarak yazıldı */
+        yer_esyasi_yaz(b, e->id, e->x, e->y, &e->e, 1, ilk);
+        ilk = 0;
+    }
+    buf_putc(b, ']');
+}
+
+/* ================================================================== portallar */
+
+static int portal_sira(const HaritaKaydi *h, long long id)
+{
+    for (int i = 0; h && i < h->portal_n; i++)
+        if (h->portal[i].id == id) return i;
+    return -1;
+}
+
+/* Oyuncu bu noktayı daha önce görmüş mü (keşfettiği alanda mı) */
+static int kesfedilmis(const Bilgi *bl, double x, double y)
+{
+    for (int i = 0; bl && i < bl->kesif_n; i++) {
+        const Kapsul *k = &bl->kesif[i];
+        if (nokta_parca_mesafesi(x, y, k->x1, k->y1, k->x2, k->y2) <= k->r + 1e-4) return 1;
+    }
+    return 0;
+}
+
+/* ,"portallar":[{"id":..,"ad":..,"x":..,"y":..,"hedef":..,"hx":..,"hy":..}]
+   Oyuncular portalı haritanın bir parçası gibi görür: görüş menzilinde ya da daha önce gördüğü yerdeyse. Nereye çıktığını
+   yalnızca GM bilir. */
+static void portallar_yaz(Buf *b, const HaritaKaydi *h, const Karakter *v, const Bilgi *bl)
+{
+    buf_puts(b, ",\"portallar\":[");
+    int ilk = 1;
+    for (int i = 0; h && i < h->portal_n; i++) {
+        const Portal *p = &h->portal[i];
+        if (v && (h->gizli || (h->iz.sis && mesafe(v->o.x, v->o.y, p->x, p->y) > gorus_menzili() + 1e-4 && !kesfedilmis(bl, p->x, p->y))))
+            continue;
+        buf_printf(b, "%s{\"id\":%lld,\"ad\":", ilk ? "" : ",", p->id);
+        ilk = 0;
+        buf_json_str(b, p->ad);
+        sayi_alani(b, "x", p->x);
+        sayi_alani(b, "y", p->y);
+        if (!v) {
+            buf_puts(b, ",\"hedef\":");
+            if (p->hedef) buf_json_str(b, p->hedef);
+            else buf_puts(b, "null");
+            sayi_alani(b, "hx", p->hx);
+            sayi_alani(b, "hy", p->hy);
+        }
         buf_putc(b, '}');
     }
     buf_putc(b, ']');
+}
+
+/* Oyuncunun yürüyüşü bir portalda bittiyse hedef haritaya geçer. Varışta portal tetiklenmez (yürüyüş değil). */
+static void portaldan_gec(Karakter *k)
+{
+    HaritaKaydi *h = haritasi(k);
+    if (k->npc || k->olu || !h) return;
+    for (int i = 0; i < h->portal_n; i++) {
+        Portal *p = &h->portal[i];
+        if (!p->hedef || mesafe(p->x, p->y, k->o.x, k->o.y) > PORTAL_MESAFESI) continue;
+        HaritaKaydi *hh = harita_bul(p->hedef, 0);
+        float g, y;
+        if (!hh || !harita_olcu(hh, &g, &y)) continue;
+        double hx = sinirla_d(p->hx, 0, g), hy = sinirla_d(p->hy, 0, y);
+        char m[400], ad[AD_N];
+        kopyala(ad, sizeof ad, p->ad);
+        portal_yayinla(h, k, p->x, p->y, 0);
+        istekleri_temizle(k->id);
+        hedef_istegini_dusur(k->id);
+        takaslari_bitir(k->id, "Takas bitti: karşı taraf portaldan geçti.");
+        harita_ata(k, hh->dosya); /* bundan sonra h ve p kullanılmaz */
+        k->o.x = (float)hx;
+        k->o.y = (float)hy;
+        snprintf(m, sizeof m, "%s portaldan geçti%s%s.", k->ad, ad[0] ? ": " : "", ad);
+        kayit_sahibe("bilgi", k, m);
+        bilgileri_guncelle();
+        portal_yayinla(hh, k, hx, hy, 1);
+        return;
+    }
 }
 
 /* {"can":10,"odak":0,...,"agirlik":3} (ağırlık sunucunun hesabıdır, GM düzenleyemez) */
@@ -1681,10 +1867,10 @@ static void statlar_yaz(Buf *b, const Oyuncu *o)
     buf_putc(b, '}');
 }
 
-/* Ağırlık arttıkça pul büyür: yüksüz 1, 20 ve üstü yükte 1.8 kat */
+/* Pul ağırlıkla büyür: 70 ağırlıkta 1 kat; ağırlık iki katına çıkınca iki kat (0.6 ile 2.2 kat arasında) */
 static double token_olcegi(const Karakter *k)
 {
-    return 1 + fmin(fmax(k->o.agirlik, 0), 20) * 0.04;
+    return fmin(fmax(k->o.agirlik / VARSAYILAN_AGIRLIK, 0.6), 2.2);
 }
 
 /* Tokenın görünümü: ,"resim":url|null,"sapka":url|null,"olcek":1.2 */
@@ -1783,7 +1969,7 @@ static void harita_json(Buf *b, HaritaKaydi *h, float g, float y)
     buf_printf(b, "?v=%lld\",\"gen\":%d,\"yuk\":%d,\"genislik\":", h->g_mtime, h->gen, h->yuk);
     sayi_yaz(b, g);
     sayi_alani(b, "yukseklik", y);
-    buf_printf(b, ",\"gizli\":%s,\"izgara\":", O.gizli ? "true" : "false");
+    buf_printf(b, ",\"gizli\":%s,\"izgara\":", h->gizli ? "true" : "false");
     izgara_json(b, &h->iz);
     buf_putc(b, '}');
 }
@@ -1882,11 +2068,11 @@ static void durum_yaz_gm(Buf *b)
     if (h && harita_olcu(h, &g, &y)) harita_json(b, h, g, y);
     else buf_puts(b, "null");
 
+    /* Bütün karakterler: hangi haritada oldukları (harita), GM'in baktığı haritada mı (burada) */
     buf_puts(b, ",\"karakterler\":[");
     int ilk = 1;
     for (int i = 0; i < O.kar_n; i++) {
         const Karakter *k = O.kar[i];
-        if (k->npc && !haritada(k)) continue;
         if (!ilk) buf_putc(b, ',');
         ilk = 0;
         buf_puts(b, "{\"id\":");
@@ -1894,9 +2080,14 @@ static void durum_yaz_gm(Buf *b)
         buf_puts(b, ",\"ad\":");
         buf_json_str(b, k->ad);
         buf_printf(b,
-                   ",\"renk\":\"%s\",\"npc\":%s,\"gizli\":%s,\"olu\":%s,\"cevrimici\":%s,\"sirada\":%s,\"yerde\":%s,\"x\":",
+                   ",\"renk\":\"%s\",\"npc\":%s,\"gizli\":%s,\"olu\":%s,\"cevrimici\":%s,\"sirada\":%s,\"yerde\":%s,"
+                   "\"burada\":%s,\"para\":%d,\"harita\":",
                    k->renk, k->npc ? "true" : "false", k->gizli ? "true" : "false", k->olu ? "true" : "false",
-                   k->baglanti > 0 ? "true" : "false", sirada_mi(k->id) ? "true" : "false", haritada(k) ? "true" : "false");
+                   k->baglanti > 0 ? "true" : "false", sirada_mi(k->id) ? "true" : "false", haritada(k) ? "true" : "false",
+                   gm_haritasinda(k) ? "true" : "false", k->o.para);
+        if (k->harita) buf_json_str(b, k->harita);
+        else buf_puts(b, "null");
+        buf_puts(b, ",\"x\":");
         sayi_yaz(b, k->o.x);
         sayi_alani(b, "y", k->o.y);
         gorunum_alanlari(b, k);
@@ -1928,7 +2119,23 @@ static void durum_yaz_gm(Buf *b)
 
     buf_puts(b, ",\"istek\":");
     istek_json(b, O.istek_var ? &O.istek : NULL);
-    yerdekiler_yaz(b, h, NULL);
+    yerdekiler_yaz(b, h, NULL, NULL);
+    portallar_yaz(b, h, NULL, NULL);
+    /* Portal hedefi seçerken: bütün haritaların portalları */
+    buf_puts(b, ",\"portal_listesi\":[");
+    int pilk = 1;
+    for (int i = 0; i < O.harita_n; i++)
+        for (int k = 0; k < O.harita[i].portal_n; k++) {
+            const Portal *p = &O.harita[i].portal[k];
+            buf_printf(b, "%s{\"harita\":", pilk ? "" : ",");
+            pilk = 0;
+            buf_json_str(b, O.harita[i].dosya);
+            buf_printf(b, ",\"id\":%lld,\"ad\":", p->id);
+            buf_json_str(b, p->ad);
+            buf_putc(b, '}');
+        }
+    buf_putc(b, ']');
+    takaslar_yaz(b, NULL);
     buyuler_yaz(b);
     gorunum_listesi_yaz(b);
     sayi_alani(b, "gorus", gorus_menzili());
@@ -1999,9 +2206,9 @@ static void token_yaz(Buf *b, const Karakter *t, double x, double y, int olu, in
 static int taniyor(const Karakter *v, const Karakter *t, Bilgi *bl)
 {
     if (t == v || !t->npc) return 1;
-    if (!haritada(t) || t->gizli) return 0;
+    if (t->gizli) return 0;
     if (goruyor(v, t)) return 1;
-    if (!sis_acik()) return 0;
+    if (!sis_acik(haritasi(v))) return 0;
     return bl && bilinen_bul(bl, t->id);
 }
 
@@ -2051,7 +2258,7 @@ static void durum_yaz_oyuncu(Buf *b, Istemci *c, Karakter *ben)
     buf_json_str(b, ben->id);
     buf_puts(b, ",\"ad\":");
     buf_json_str(b, ben->ad);
-    buf_printf(b, ",\"renk\":\"%s\",\"yerde\":%s", ben->renk, haritada(ben) ? "true" : "false");
+    buf_printf(b, ",\"renk\":\"%s\",\"yerde\":%s,\"para\":%d", ben->renk, haritada(ben) ? "true" : "false", ben->o.para);
     gorunum_alanlari(b, ben);
     buf_puts(b, ",\"resim_yolu\":");
     buf_json_str(b, ben->resim);
@@ -2061,14 +2268,15 @@ static void durum_yaz_oyuncu(Buf *b, Istemci *c, Karakter *ben)
     buf_json_str(b, O.ayar.oyun_adi);
     oyuncular_yaz(b);
 
-    HaritaKaydi *h = aktif_harita();
+    /* Oyuncu yalnızca kendi haritasını görür */
+    HaritaKaydi *h = haritasi(ben);
     float g = 0, y = 0;
     Bilgi *bl = NULL;
     buf_puts(b, ",\"harita\":");
     if (!h || !harita_olcu(h, &g, &y)) {
-        buf_puts(b, "null,\"tokenler\":[],\"yerdekiler\":[]");
-    } else if (O.gizli) {
-        buf_puts(b, "{\"gizli\":true},\"tokenler\":[],\"yerdekiler\":[]");
+        buf_puts(b, "null,\"tokenler\":[],\"yerdekiler\":[],\"portallar\":[]");
+    } else if (h->gizli) {
+        buf_puts(b, "{\"gizli\":true},\"tokenler\":[],\"yerdekiler\":[],\"portallar\":[]");
     } else {
         harita_json(b, h, g, y);
         if (h->iz.sis) bl = bilgi_bul(h, ben->id, 0);
@@ -2076,13 +2284,12 @@ static void durum_yaz_oyuncu(Buf *b, Istemci *c, Karakter *ben)
         int ilk = 1;
         for (int i = 0; i < O.kar_n; i++) {
             const Karakter *t = O.kar[i];
-            if (!haritada(t)) continue;
-            if (t == ben || goruyor(ben, t)) {
+            if (goruyor(ben, t) && haritada(t)) {
                 if (!ilk) buf_putc(b, ',');
                 ilk = 0;
                 token_yaz(b, t, t->o.x, t->o.y, t->olu, 1, t == ben);
             } else if (bl) {
-                Bilinen *e = bilinen_bul(bl, t->id);
+                Bilinen *e = bilinen_bul(bl, t->id); /* başka haritaya gitmiş olsa da hatırası burada kalır */
                 if (!e) continue;
                 if (!ilk) buf_putc(b, ',');
                 ilk = 0;
@@ -2090,9 +2297,11 @@ static void durum_yaz_oyuncu(Buf *b, Istemci *c, Karakter *ben)
             }
         }
         buf_putc(b, ']');
-        yerdekiler_yaz(b, h, ben);
+        yerdekiler_yaz(b, h, ben, bl);
+        portallar_yaz(b, h, ben, bl);
         if (h->iz.sis) kesif_yaz(b, c, h, bl);
     }
+    takaslar_yaz(b, ben);
     sayi_alani(b, "gorus", gorus_menzili());
     buf_printf(b, ",\"envanter_azami\":%d", ENVANTER_AZAMI);
     buyuler_yaz(b);
@@ -2123,7 +2332,7 @@ static void durum_yaz_oyuncu(Buf *b, Istemci *c, Karakter *ben)
     int ilk = 1;
     for (int i = 0; i < O.sira.n; i++) {
         Karakter *t = karakter_bul(O.sira.liste[i]);
-        if (!t || !sahnede(t)) continue;
+        if (!t) continue;
         if (!ilk) buf_putc(b, ',');
         ilk = 0;
         int tanir = taniyor(ben, t, bl);
@@ -2287,7 +2496,7 @@ static void kurallara_gir(Karakter *yapan, Karakter *hedef, const char *baglam)
     kural_yapan = yapan;
     kural_hedef = hedef;
     kural_baglam = baglam;
-    HaritaKaydi *h = aktif_harita();
+    HaritaKaydi *h = haritasi(yapan); /* harita: işi yapanın bulunduğu harita */
     float g = 0, y = 0;
     if (h && harita_olcu(h, &g, &y)) {
         harita.genislik = g;
@@ -2325,6 +2534,8 @@ static void karakter_onar(Karakter *k, const Oyuncu *once, const char *baglam)
 {
     k->o.ad = k->ad;
     k->o.npc = k->npc;
+    if (k->o.para < 0) k->o.para = 0; /* para bakır cinsinden, eksiye düşmez */
+    if (k->o.para > AZAMI_PARA) k->o.para = AZAMI_PARA;
     alan_onar(&k->o.x, once->x, -AZAMI_STAT, AZAMI_STAT, k, "x", baglam);
     alan_onar(&k->o.y, once->y, -AZAMI_STAT, AZAMI_STAT, k, "y", baglam);
     for (int i = 0; i < DIZI_N(STATLAR); i++) {
@@ -2508,7 +2719,7 @@ static void olumleri_denetle(void)
 {
     for (int i = 0; i < O.kar_n; i++) {
         Karakter *k = O.kar[i];
-        if (!k->olu && sahnede(k) && k->o.can <= 0) oldur(k);
+        if (!k->olu && k->o.can <= 0) oldur(k);
     }
 }
 
@@ -2525,7 +2736,7 @@ static void sira_ilerle(void)
             O.sira.tur_no++;
         }
         Karakter *k = karakter_bul(O.sira.liste[O.sira.indeks]);
-        if (!k || k->olu || !sahnede(k)) continue;
+        if (!k || k->olu || (k->npc && !haritada(k))) continue;
         if (!k->npc && (k->baglanti <= 0 || !haritada(k))) {
             if (deneme < O.sira.n) {
                 char m[200];
@@ -2577,7 +2788,7 @@ static int uygun_var(void)
 {
     for (int i = 0; i < O.sira.n; i++) {
         Karakter *k = karakter_bul(O.sira.liste[i]);
-        if (k && !k->olu && sahnede(k) && (k->npc || (k->baglanti > 0 && haritada(k)))) return 1;
+        if (k && !k->olu && haritada(k) && (k->npc || k->baglanti > 0)) return 1;
     }
     return 0;
 }
@@ -2660,12 +2871,13 @@ static int tamsayi_al(const Json *j, const char *k, int *out)
 static int eyleme_hazir(Istemci *c, Karakter *ben, const char *eylem)
 {
     char m[200];
-    if (!O.aktif || O.gizli) {
-        istemciye_hata(c, "Şu an açık bir harita yok.");
+    HaritaKaydi *h = haritasi(ben);
+    if (!h) {
+        istemciye_hata(c, "Henüz haritada değilsin; GM seni haritaya yerleştirecek.");
         return 0;
     }
-    if (!haritada(ben)) {
-        istemciye_hata(c, "Henüz haritada değilsin; GM seni haritaya yerleştirecek.");
+    if (h->gizli) {
+        istemciye_hata(c, "GM haritayı hazırlıyor; biraz bekle.");
         return 0;
     }
     if (ben->olu) {
@@ -2692,7 +2904,7 @@ static int eyleme_hazir(Istemci *c, Karakter *ben, const char *eylem)
 /* Oyuncu haritada bir yere tıkladı: GM'e hareket isteği gider. */
 static void m_hareket(Istemci *c, Karakter *ben, const Json *j)
 {
-    HaritaKaydi *h = aktif_harita();
+    HaritaKaydi *h = haritasi(ben);
     float g, y;
     if (!eyleme_hazir(c, ben, "yürüyebilirsin")) return;
     if (!h || !harita_olcu(h, &g, &y)) {
@@ -2815,7 +3027,7 @@ static void m_istek_onayla(Istemci *c, const Json *j)
         return;
     }
     if (is.tur == ISTEK_HAREKET) {
-        HaritaKaydi *h = aktif_harita();
+        HaritaKaydi *h = haritasi(k);
         float g, y;
         if (!h || !harita_olcu(h, &g, &y)) {
             herkese_durum();
@@ -2840,7 +3052,7 @@ static void m_istek_onayla(Istemci *c, const Json *j)
     }
     Karakter *t = karakter_bul(is.hedef);
     if (is.tur == ISTEK_BUYU) {
-        if (!t || !haritada(t) || t->olu || !buyu_gecerli(is.buyu)) {
+        if (!t || !ayni_haritada(k, t) || t->olu || !buyu_gecerli(is.buyu)) {
             istemciye_hata(c, "Bu büyü artık yapılamaz (hedef ya da büyü değişti).");
             herkese_durum();
             return;
@@ -2849,7 +3061,7 @@ static void m_istek_onayla(Istemci *c, const Json *j)
         yayinla_ve_enerji_denetle(k);
         return;
     }
-    if (!t || t == k || !haritada(t) || t->olu) {
+    if (!t || t == k || !ayni_haritada(k, t) || t->olu) {
         istemciye_hata(c, "Hedef artık saldırılabilir değil.");
         herkese_durum();
         return;
@@ -2938,14 +3150,12 @@ int oyuncu_giris(const char *ad_ham, const char *sifre, char token[65], char *ha
         return 409;
     }
     if (!p) {
-        konumlari_kaydet(); /* diğerlerinin şimdiki yerleri kayda geçsin; yenisi boş bir kareye konur */
+        /* Yeni oyuncu hiçbir haritada değildir; GM onu bir haritaya yerleştirir */
         if (oyuncu_sayisi() >= AZAMI_OYUNCU || !(p = karakter_olustur(0, NULL, ad, siradaki_renk()))) {
             kopyala(hata, hn, "Oyun dolu.");
             return 409;
         }
         siraya_ekle(p->id);
-        konumlari_yukle();
-        bilgileri_guncelle();
         char m[200];
         snprintf(m, sizeof m, "%s oyuna katıldı.", p->ad);
         kayit_metin("bilgi", GOR_HERKES, NULL, m);
@@ -3070,11 +3280,11 @@ static void m_zar(Istemci *c, Karakter *ben, const Json *j)
 static void m_isaret(Istemci *c, Karakter *ben, const Json *j)
 {
     if (!c->gm && !izin_ver(c)) return;
-    HaritaKaydi *h = aktif_harita();
-    if (!h || (!c->gm && O.gizli)) return;
+    HaritaKaydi *h = c->gm ? aktif_harita() : haritasi(ben);
+    if (!h || (!c->gm && h->gizli)) return;
     double x = json_sayi(j, "x", -1e9), y = json_sayi(j, "y", -1e9);
     if (x < -1e5 || y < -1e5 || x > 1e5 || y > 1e5) return;
-    isaret_yayinla(x, y, c->gm ? "GM" : ben->ad, c->gm ? GM_RENK : ben->renk, c->gm && json_mantik(j, "odak", 0));
+    isaret_yayinla(h, x, y, c->gm ? "GM" : ben->ad, c->gm ? GM_RENK : ben->renk, c->gm && json_mantik(j, "odak", 0));
 }
 
 static void m_tur_bitir(Istemci *c, Karakter *ben)
@@ -3119,24 +3329,9 @@ static void m_harita_ac(Istemci *c, const Json *j)
             return;
         }
     }
-    konumlari_kaydet();
-    istekleri_temizle(NULL);
+    /* Yalnızca GM'in baktığı harita değişir; oyuncular kendi haritalarında kalır */
     aktif_degistir(kapat ? NULL : dosya);
-    if (kapat) {
-        kayit_metin("bilgi", GOR_HERKES, NULL, "Harita kapatıldı.");
-        herkese_durum();
-        return;
-    }
-    boyut_al(harita_bul(dosya, 1), j);
-    konumlari_yukle();
-    bilgileri_guncelle();
-    char ad[AD_N], m[300];
-    esya_adi(dosya, ad, sizeof ad);
-    snprintf(m, sizeof m, "Yeni harita: %s", ad);
-    kayit_metin("bilgi", O.gizli ? GOR_GM : GOR_HERKES, NULL, m);
-    /* Sıra başka haritadaki bir NPC'deyse ilerlesin */
-    Karakter *s = siradaki();
-    if (s && !sahnede(s)) sira_ilerle();
+    if (!kapat) boyut_al(harita_bul(dosya, 1), j);
     herkese_durum();
 }
 
@@ -3154,7 +3349,7 @@ static void m_izgara(Istemci *c, const Json *j)
     iz->acik = json_mantik(j, "acik", iz->acik);
     iz->sis = json_mantik(j, "sis", iz->sis);
     iz->oturt = json_mantik(j, "oturt", iz->oturt);
-    sinirlara_al();
+    sinirlara_al(h);
     bilgileri_guncelle();
     kirlet();
     herkese_durum();
@@ -3181,7 +3376,7 @@ static void m_tasi(Istemci *c, const Json *j)
     if (!h || !harita_olcu(h, &g, &y)) return;
     Karakter *k = karakter_bul(json_metin(j, "id"));
     double x = json_sayi(j, "x", NAN), yy = json_sayi(j, "y", NAN);
-    if (!k || !haritada(k) || !isfinite(x) || !isfinite(yy)) {
+    if (!k || !gm_haritasinda(k) || !isfinite(x) || !isfinite(yy)) {
         istemciye_hata(c, "Taşınamadı.");
         return;
     }
@@ -3213,7 +3408,6 @@ static void m_npc_ekle(Istemci *c)
     }
     k->harita = xstrdup(O.aktif);
     k->o.x = k->o.y = -1000; /* boş yer ararken kendine çarpmasın */
-    konumlari_kaydet();       /* oyuncuların şimdiki yerleri dolu sayılsın */
     bos_yer(h, g, y, &k->o.x, &k->o.y);
     bilgileri_guncelle();
     herkese_durum();
@@ -3229,7 +3423,7 @@ static void m_npc_ekle(Istemci *c)
 static void m_karakter_guncelle(const Json *j)
 {
     Karakter *k = karakter_bul(json_metin(j, "id"));
-    if (!k || !sahnede(k)) return;
+    if (!k) return;
     if (k->npc) {
         const char *ad = json_metin(j, "ad"), *renk = json_metin(j, "renk");
         char temiz[AD_N];
@@ -3247,6 +3441,9 @@ static void m_karakter_guncelle(const Json *j)
         if (v && v->tur == JSON_NUM && isfinite(v->sayi))
             *stat_yeri(&k->o, &STATLAR[i]) = (float)sinirla_d(v->sayi, STATLAR[i].lo, STATLAR[i].hi);
     }
+    Json *para = json_al(j, "para");
+    if (para && para->tur == JSON_NUM && isfinite(para->sayi)) k->o.para = (int)sinirla_d(round(para->sayi), 0, AZAMI_PARA);
+    agirlik_hesapla(&k->o);
     kirlet();
     bilgileri_guncelle();
     yayinla_ve_enerji_denetle(k);
@@ -3264,7 +3461,7 @@ static void m_npc_sil(const Json *j)
 static void m_oldur(const Json *j)
 {
     Karakter *k = karakter_bul(json_metin(j, "id"));
-    if (!k || !sahnede(k) || k->olu) return;
+    if (!k || k->olu) return;
     int sirasiydi = siradaki() == k;
     oldur(k);
     if (sirasiydi) tur_bitir_ve_ilerle();
@@ -3274,7 +3471,7 @@ static void m_oldur(const Json *j)
 static void m_dirilt(const Json *j)
 {
     Karakter *k = karakter_bul(json_metin(j, "id"));
-    if (!k || !sahnede(k) || !k->olu) return;
+    if (!k || !k->olu) return;
     k->olu = 0;
     if (k->o.can <= 0) k->o.can = 1;
     Buf s;
@@ -3487,6 +3684,8 @@ static void m_esya_duzenle(Istemci *c, const Json *j)
         e->agirlik = (float)sinirla_d(ag->sayi, 0, AZAMI_STAT);
         agirlik_hesapla(&k->o);
     }
+    Json *dy = json_al(j, "dayaniklilik");
+    if (dy && dy->tur == JSON_NUM && isfinite(dy->sayi)) e->dayaniklilik = (float)sinirla_d(dy->sayi, -AZAMI_STAT, AZAMI_STAT);
     kirlet();
     char m[300];
     if (strcmp(eski, e->ad)) snprintf(m, sizeof m, "Eşya değişti (%s): %s → %s", k->ad, eski, e->ad);
@@ -3503,8 +3702,8 @@ static void m_gm_saldiri(Istemci *c, const Json *j)
         istemciye_hata(c, "Yalnızca sırası gelen karakter saldırabilir.");
         return;
     }
-    if (!t || a == t || !haritada(a) || !haritada(t)) {
-        istemciye_hata(c, "Saldıran ve hedef açık haritada olmalı.");
+    if (!t || a == t || !ayni_haritada(a, t)) {
+        istemciye_hata(c, "Saldıran ve hedef aynı haritada olmalı.");
         return;
     }
     if (a->olu || t->olu) {
@@ -3528,8 +3727,8 @@ static void m_gm_buyu(Istemci *c, const Json *j)
         istemciye_hata(c, "Yalnızca sırası gelen karakter büyü yapabilir.");
         return;
     }
-    if (!t || !haritada(a) || !haritada(t)) {
-        istemciye_hata(c, "Büyüyü yapan ve hedef açık haritada olmalı.");
+    if (!t || !ayni_haritada(a, t)) {
+        istemciye_hata(c, "Büyüyü yapan ve hedef aynı haritada olmalı.");
         return;
     }
     if (a->olu || t->olu) {
@@ -3546,7 +3745,8 @@ static void m_gm_buyu(Istemci *c, const Json *j)
     yayinla_ve_enerji_denetle(a);
 }
 
-/* GM bir karakteri (listeden sürükleyerek) haritaya yerleştirdi. Zaten haritadaysa oraya yürür. */
+/* GM bir karakteri (listeden sürükleyerek) baktığı haritaya koydu. Zaten bu haritadaysa oraya yürür; başka bir
+   haritadaysa (ya da hiçbir haritada değilse) buraya geçer. */
 static void m_yerlestir(Istemci *c, const Json *j)
 {
     HaritaKaydi *h = aktif_harita();
@@ -3561,38 +3761,39 @@ static void m_yerlestir(Istemci *c, const Json *j)
         istemciye_hata(c, "Yerleştirilemedi.");
         return;
     }
-    if (k->npc && !haritada(k)) {
-        istemciye_hata(c, "Bu NPC başka bir haritada.");
+    if (k->npc && !gm_haritasinda(k) && haritadaki_npc_sayisi() >= AZAMI_NPC) {
+        istemciye_hata(c, "Bu haritada çok fazla NPC var.");
         return;
     }
     hedefe_oturt(h, &x, &yy, g, y);
     istekleri_temizle(k->id);
-    if (haritada(k)) {
+    if (gm_haritasinda(k)) {
         hareket_uygula(k, x, yy);
     } else {
+        hedef_istegini_dusur(k->id);
+        takaslari_bitir(k->id, "Takas bitti: karşı taraf başka bir haritaya geçti.");
+        harita_ata(k, h->dosya);
         k->o.x = (float)x;
         k->o.y = (float)yy;
-        k->yerde = 1;
-        konum_yaz(h, k->id, k->o.x, k->o.y);
-        char m[200];
-        snprintf(m, sizeof m, "%s haritaya yerleştirildi.", k->ad);
+        char m[300], ad[AD_N];
+        esya_adi(h->dosya, ad, sizeof ad);
+        snprintf(m, sizeof m, "%s şu haritaya kondu: %s", k->ad, ad);
         kayit_sahibe("bilgi", k, m);
         bilgileri_guncelle();
-        yerden_al(k);
+        yerden_al(k, k->o.x, k->o.y);
     }
     herkese_durum();
 }
 
-/* GM bir oyuncuyu açık haritadan kaldırdı: yeniden yerleştirilene kadar haritada değildir. */
+/* GM bir oyuncuyu haritadan kaldırdı: yeniden yerleştirilene kadar hiçbir haritada değildir. */
 static void m_haritadan_kaldir(const Json *j)
 {
     Karakter *k = karakter_bul(json_metin(j, "id"));
-    HaritaKaydi *h = aktif_harita();
-    if (!k || k->npc || !h || !k->yerde) return;
-    k->yerde = 0;
-    konum_sil(h, k->id);
+    if (!k || k->npc || !haritada(k)) return;
+    harita_ata(k, NULL);
     istekleri_temizle(k->id);
     hedef_istegini_dusur(k->id);
+    takaslari_bitir(k->id, "Takas bitti: karşı taraf haritadan çıktı.");
     char m[200];
     snprintf(m, sizeof m, "%s haritadan kaldırıldı.", k->ad);
     kayit_sahibe("bilgi", k, m);
@@ -3654,7 +3855,7 @@ static void m_esya_birak(Istemci *c, const Json *j)
     double en = 1e9;
     for (int i = 0; i < O.kar_n; i++) {
         Karakter *k = O.kar[i];
-        if (!haritada(k) || k->olu) continue;
+        if (!bu_haritada(k, h->dosya) || k->olu) continue;
         double d = mesafe(k->o.x, k->o.y, x, yy);
         if (d <= BIRAKMA_MESAFESI * token_olcegi(k) && d < en) {
             en = d;
@@ -3667,6 +3868,7 @@ static void m_esya_birak(Istemci *c, const Json *j)
         if (veren) envanter_cikar(&veren->o, sira);
         if (yer_sira >= 0) yerden_kaldir(h, yer_sira);
         envantere_eklendi(alan, e.ad);
+        bilgileri_guncelle();
         herkese_durum();
         return;
     }
@@ -3690,6 +3892,7 @@ static void m_esya_birak(Istemci *c, const Json *j)
             envanter_cikar(&veren->o, sira);
         }
     }
+    bilgileri_guncelle();
     herkese_durum();
 }
 
@@ -3701,15 +3904,47 @@ static void m_yer_esya_sil(const Json *j)
     int i = yer_esyasi_sira(h, id);
     if (i < 0) return;
     yerden_kaldir(h, i);
+    bilgileri_guncelle();
+    herkese_durum();
+}
+
+/* Oyuncunun envanterindeki bir eşya: sıra ve (değişmediğini doğrulamak için) ad. Yumruksa ya da bulunamazsa
+   nedenini yazar, -1 döner. */
+static int oyuncu_esyasi(Istemci *c, Karakter *ben, const Json *j, const char *yumruk_hatasi)
+{
+    int i;
+    if (!tamsayi_al(j, "sira", &i) || i < 0 || i >= ben->o.envanter_adet) return -1;
+    const char *ad = json_metin(j, "ad");
+    if (ad && strcmp(ad, ben->o.envanter[i].ad)) {
+        istemciye_hata(c, "Envanterin değişti; yeniden dene.");
+        durum_gonder(c);
+        return -1;
+    }
+    if (ben->o.envanter[i].sabit) {
+        istemciye_hata(c, yumruk_hatasi);
+        return -1;
+    }
+    return i;
+}
+
+/* Oyuncu bir eşyasını yok etti (yumruk yok edilemez). */
+static void m_esya_imha(Istemci *c, Karakter *ben, const Json *j)
+{
+    int i = oyuncu_esyasi(c, ben, j, "Yumruk yok edilemez.");
+    if (i < 0) return;
+    char m[300];
+    snprintf(m, sizeof m, "%s bir eşyayı yok etti: %s", ben->ad, ben->o.envanter[i].ad);
+    envanter_cikar(&ben->o, i);
+    kayit_sahibe("esya", ben, m);
     herkese_durum();
 }
 
 /* Oyuncu bir eşyasını bulunduğu yere bıraktı (yumruk bırakılamaz). */
 static void m_esya_yere(Istemci *c, Karakter *ben, const Json *j)
 {
-    HaritaKaydi *h = aktif_harita();
+    HaritaKaydi *h = haritasi(ben);
     int i;
-    if (!h || O.gizli || !haritada(ben)) {
+    if (!h || h->gizli) {
         istemciye_hata(c, "Eşya bırakmak için haritada olmalısın.");
         return;
     }
@@ -3717,17 +3952,7 @@ static void m_esya_yere(Istemci *c, Karakter *ben, const Json *j)
         istemciye_hata(c, "Ölüler eşya bırakamaz.");
         return;
     }
-    if (!tamsayi_al(j, "sira", &i) || i < 0 || i >= ben->o.envanter_adet) return;
-    const char *ad = json_metin(j, "ad");
-    if (ad && strcmp(ad, ben->o.envanter[i].ad)) {
-        istemciye_hata(c, "Envanterin değişti; yeniden dene.");
-        durum_gonder(c);
-        return;
-    }
-    if (ben->o.envanter[i].sabit) {
-        istemciye_hata(c, "Yumruk bırakılamaz.");
-        return;
-    }
+    if ((i = oyuncu_esyasi(c, ben, j, "Yumruk bırakılamaz.")) < 0) return;
     Esya e = ben->o.envanter[i];
     if (!yere_koy(h, &e, ben->o.x, ben->o.y)) {
         istemciye_hata(c, "Bu haritada yerde çok fazla eşya var.");
@@ -3741,6 +3966,7 @@ static void m_esya_yere(Istemci *c, Karakter *ben, const Json *j)
     snprintf(m, sizeof m, "%s yere bıraktı: %s", ben->ad, e.ad);
     kayit_metin("esya", GOR_GM_SAHIP, s.p, m);
     buf_free(&s);
+    bilgileri_guncelle();
     herkese_durum();
 }
 
@@ -3769,6 +3995,582 @@ static void m_gorunum(Istemci *c, Karakter *ben, const Json *j)
     }
     if (resim) kopyala(k->resim, sizeof k->resim, resim);
     if (sapka) kopyala(k->sapka, sizeof k->sapka, sapka);
+    kirlet();
+    herkese_durum();
+}
+
+static int esya_yukle(const Json *o, Esya *e);
+
+/* ------------------------------------------------------------------ ölünün üstünü aramak */
+
+/* Arayan yaşıyor, ölü aynı haritada, görüşte ve yakında olmalı. Olmazsa nedenini yazar, NULL döner. */
+static Karakter *yagma_hedefi(Istemci *c, Karakter *ben, const Json *j)
+{
+    Karakter *t = karakter_bul(json_metin(j, "hedef"));
+    if (!t || t == ben || !goruyor(ben, t)) {
+        istemciye_hata(c, "Bu karakteri göremiyorsun.");
+        return NULL;
+    }
+    if (!t->olu) {
+        istemciye_hata(c, "Yalnızca ölülerin üstü aranabilir.");
+        return NULL;
+    }
+    if (ben->olu) {
+        istemciye_hata(c, "Öldün; GM seni diriltebilir.");
+        return NULL;
+    }
+    if (mesafe(ben->o.x, ben->o.y, t->o.x, t->o.y) > YAGMA_MESAFESI) {
+        istemciye_hata(c, "Üstünü aramak için ona yaklaş.");
+        return NULL;
+    }
+    return t;
+}
+
+/* {"t":"ganimet","hedef":..,"ad":..,"para":..,"envanter":[{"sira":..,"esya":{...}}]} (yumruk alınamaz, gösterilmez) */
+static void ganimet_gonder(Istemci *c, const Karakter *ben, const Karakter *t)
+{
+    Buf b;
+    buf_init(&b);
+    buf_puts(&b, "{\"t\":\"ganimet\",\"hedef\":");
+    buf_json_str(&b, t->id);
+    buf_puts(&b, ",\"ad\":");
+    buf_json_str(&b, t->ad);
+    buf_printf(&b, ",\"para\":%d,\"envanter\":[", t->o.para);
+    int ilk = 1;
+    for (int i = 0; i < t->o.envanter_adet; i++) {
+        if (t->o.envanter[i].sabit) continue;
+        buf_printf(&b, "%s{\"sira\":%d,\"esya\":", ilk ? "" : ",", i);
+        ilk = 0;
+        esya_json(&b, &t->o.envanter[i]);
+        buf_putc(&b, '}');
+        resim_izni_ver(ben, t->o.envanter[i].resim);
+    }
+    buf_puts(&b, "]}");
+    gonder_buf(c, &b);
+    buf_free(&b);
+}
+
+/* Para metni: 851 → "4 altın 12 gümüş 3 bakır", 0 → "0 bakır" (BUF'a ekler) */
+static void para_yaz(Buf *b, int bakir)
+{
+    int a = bakir / ALTIN, g = bakir % ALTIN / GUMUS, k = bakir % GUMUS;
+    const char *ara = "";
+    if (a) {
+        buf_printf(b, "%d altın", a);
+        ara = " ";
+    }
+    if (g) {
+        buf_printf(b, "%s%d gümüş", ara, g);
+        ara = " ";
+    }
+    if (k || !*ara) buf_printf(b, "%s%d bakır", ara, k);
+}
+
+static void m_ganimet_bak(Istemci *c, Karakter *ben, const Json *j)
+{
+    Karakter *t = yagma_hedefi(c, ben, j);
+    if (t) ganimet_gonder(c, ben, t);
+}
+
+/* Ölünün bir eşyasını (sira, ad), parasını (para: true) ya da hepsini (hepsi: true) alır. */
+static void m_ganimet_al(Istemci *c, Karakter *ben, const Json *j)
+{
+    Karakter *t = yagma_hedefi(c, ben, j);
+    if (!t) return;
+    Buf alinan;
+    buf_init(&alinan);
+    int dolu = 0;
+    int hepsi = json_mantik(j, "hepsi", 0);
+    if ((hepsi || json_mantik(j, "para", 0)) && t->o.para > 0) {
+        long long yeni = (long long)ben->o.para + t->o.para;
+        ben->o.para = (int)(yeni > AZAMI_PARA ? AZAMI_PARA : yeni);
+        if (alinan.len) buf_puts(&alinan, ", ");
+        para_yaz(&alinan, t->o.para);
+        t->o.para = 0;
+        kirlet();
+    }
+    int i;
+    if (!hepsi && tamsayi_al(j, "sira", &i)) {
+        const char *ad = json_metin(j, "ad");
+        if (i < 0 || i >= t->o.envanter_adet || t->o.envanter[i].sabit || (ad && strcmp(ad, t->o.envanter[i].ad))) {
+            istemciye_hata(c, "Bu eşya artık orada değil.");
+        } else if (envantere_koy(ben, &t->o.envanter[i])) {
+            buf_printf(&alinan, "%s%s", alinan.len ? ", " : "", t->o.envanter[i].ad);
+            envanter_cikar(&t->o, i);
+        } else {
+            dolu = 1;
+        }
+    }
+    for (i = t->o.envanter_adet - 1; hepsi && i >= 0; i--) {
+        if (t->o.envanter[i].sabit) continue;
+        if (!envantere_koy(ben, &t->o.envanter[i])) {
+            dolu = 1;
+            break;
+        }
+        buf_printf(&alinan, "%s%s", alinan.len ? ", " : "", t->o.envanter[i].ad);
+        envanter_cikar(&t->o, i);
+    }
+    if (dolu) istemciye_hata(c, "Envanterin dolu; hepsini alamadın.");
+    if (alinan.len) {
+        char sahip[2 * ID_N + 4], m[700];
+        snprintf(sahip, sizeof sahip, t->npc ? ",%s," : ",%s,%s,", ben->id, t->id);
+        snprintf(m, sizeof m, "%s, %s üstünden aldı: %s", ben->ad, t->ad, alinan.p);
+        kayit_metin("esya", GOR_GM_SAHIP, sahip, m);
+    }
+    buf_free(&alinan);
+    ganimet_gonder(c, ben, t);
+    herkese_durum();
+}
+
+/* ------------------------------------------------------------------ takas */
+
+static Takas *takas_bul(long long id)
+{
+    for (int i = 0; i < O.takas_n; i++)
+        if (O.takas[i].id == id) return &O.takas[i];
+    return NULL;
+}
+
+/* kim'in sürmekte olan takası; taraf: 0 başlatan, 1 karşı taraf */
+static Takas *takas_kimin(const char *kim, int *taraf)
+{
+    for (int i = 0; i < O.takas_n; i++)
+        for (int s = 0; s < 2; s++)
+            if (!strcmp(O.takas[i].kim[s], kim)) {
+                if (taraf) *taraf = s;
+                return &O.takas[i];
+            }
+    return NULL;
+}
+
+static void takas_kaldir(Takas *t)
+{
+    int i = (int)(t - O.takas);
+    O.takas[i] = O.takas[--O.takas_n];
+}
+
+/* kim'in takaslarını bitirir; karşı taraf oyuncuysa nedenini görür. */
+static void takaslari_bitir(const char *kim, const char *neden)
+{
+    int s;
+    Takas *t;
+    while ((t = takas_kimin(kim, &s))) {
+        Karakter *karsi = karakter_bul(t->kim[1 - s]);
+        if (karsi && !karsi->npc && neden) oyuncuya_bildir(karsi, "bilgi", neden);
+        takas_kaldir(t);
+    }
+}
+
+/* Takastaki iki eşya aynı türden mi (adet tanesi verilecek tür) */
+static int esya_ayni(const Esya *a, const Esya *b)
+{
+    return esya_esit(a, b) && a->agirlik == b->agirlik && a->dayaniklilik == b->dayaniklilik && !a->sabit && !b->sabit;
+}
+
+static int esya_sayisi(const Oyuncu *o, const Esya *e)
+{
+    int n = 0;
+    for (int i = 0; i < o->envanter_adet; i++) n += esya_ayni(&o->envanter[i], e);
+    return n;
+}
+
+static void takas_yuvasi_yaz(Buf *b, const TakasYuvasi *y, int ilk)
+{
+    if (!ilk) buf_putc(b, ',');
+    if (y->tur == 1) {
+        buf_printf(b, "{\"tur\":\"esya\",\"adet\":%d,\"esya\":", y->adet);
+        esya_json(b, &y->e);
+        buf_putc(b, '}');
+    } else if (y->tur == 2) {
+        buf_printf(b, "{\"tur\":\"para\",\"para\":%d}", y->para);
+    } else {
+        buf_puts(b, "null");
+    }
+}
+
+static void takas_tarafi_yaz(Buf *b, const char *ad, const Karakter *k)
+{
+    buf_printf(b, ",\"%s\":{\"id\":", ad);
+    buf_json_str(b, k ? k->id : "");
+    buf_puts(b, ",\"ad\":");
+    buf_json_str(b, k ? k->ad : "?");
+    buf_printf(b, ",\"renk\":\"%s\",\"npc\":%s}", k ? k->renk : "#999999", k && k->npc ? "true" : "false");
+}
+
+/* Oyuncuya kendi takası: ,"takas":{"id":..,"karsi":{..},"benim":[4],"onun":[4],"onayim":..,"onayi":..} ya da null.
+   GM'e (ben NULL) hepsi: ,"takaslar":[{"id":..,"taraflar":[{..},{..}],"yuva":[[4],[4]],"onay":[..]}] */
+static void takaslar_yaz(Buf *b, const Karakter *ben)
+{
+    if (ben) {
+        int s;
+        Takas *t = takas_kimin(ben->id, &s);
+        buf_puts(b, ",\"takas\":");
+        if (!t) {
+            buf_puts(b, "null");
+            return;
+        }
+        buf_printf(b, "{\"id\":%lld", t->id);
+        takas_tarafi_yaz(b, "karsi", karakter_bul(t->kim[1 - s]));
+        for (int k = 0; k < 2; k++) {
+            int taraf = k ? 1 - s : s;
+            buf_printf(b, ",\"%s\":[", k ? "onun" : "benim");
+            for (int i = 0; i < TAKAS_YUVA; i++) {
+                takas_yuvasi_yaz(b, &t->yuva[taraf][i], i == 0);
+                if (k && t->yuva[taraf][i].tur == 1) resim_izni_ver(ben, t->yuva[taraf][i].e.resim); /* karşının resmi */
+            }
+            buf_putc(b, ']');
+        }
+        buf_printf(b, ",\"onayim\":%s,\"onayi\":%s}", t->onay[s] ? "true" : "false", t->onay[1 - s] ? "true" : "false");
+        return;
+    }
+    buf_puts(b, ",\"takaslar\":[");
+    for (int n = 0; n < O.takas_n; n++) {
+        Takas *t = &O.takas[n];
+        buf_printf(b, "%s{\"id\":%lld,\"taraflar\":[", n ? "," : "", t->id);
+        for (int s = 0; s < 2; s++) {
+            Karakter *k = karakter_bul(t->kim[s]);
+            if (s) buf_putc(b, ',');
+            buf_puts(b, "{\"id\":");
+            buf_json_str(b, t->kim[s]);
+            buf_puts(b, ",\"ad\":");
+            buf_json_str(b, k ? k->ad : "?");
+            buf_printf(b, ",\"npc\":%s,\"renk\":\"%s\"}", k && k->npc ? "true" : "false", k ? k->renk : "#999999");
+        }
+        buf_puts(b, "],\"yuva\":[");
+        for (int s = 0; s < 2; s++) {
+            buf_puts(b, s ? ",[" : "[");
+            for (int i = 0; i < TAKAS_YUVA; i++) takas_yuvasi_yaz(b, &t->yuva[s][i], i == 0);
+            buf_putc(b, ']');
+        }
+        buf_printf(b, "],\"onay\":[%s,%s]}", t->onay[0] ? "true" : "false", t->onay[1] ? "true" : "false");
+    }
+    buf_putc(b, ']');
+}
+
+/* İstemcinin bu takastaki tarafı: oyuncu kendi tarafı; GM, takastaki NPC'nin tarafı. Yoksa -1. */
+static int takas_tarafi(const Istemci *c, const Karakter *ben, const Takas *t)
+{
+    for (int s = 0; s < 2; s++) {
+        Karakter *k = karakter_bul(t->kim[s]);
+        if (!k) continue;
+        if (c->gm ? k->npc : (ben && k == ben)) return s;
+    }
+    return -1;
+}
+
+static void takas_bildir(const Takas *t, const char *metin)
+{
+    for (int s = 0; s < 2; s++) {
+        Karakter *k = karakter_bul(t->kim[s]);
+        if (k && !k->npc) oyuncuya_bildir(k, "bilgi", metin);
+    }
+}
+
+/* Takas başlar: oyuncu kendisi adına, GM bir NPC adına (yapan). Karşı taraf görüşte, aynı haritada olmalı. */
+static void m_takas_baslat(Istemci *c, Karakter *ben, const Json *j)
+{
+    Karakter *a = c->gm ? karakter_bul(json_metin(j, "yapan")) : ben;
+    Karakter *b = karakter_bul(json_metin(j, "hedef"));
+    if (!a || !b || a == b || (c->gm && !a->npc)) {
+        istemciye_hata(c, "Takas başlatılamadı.");
+        return;
+    }
+    if (a->npc && b->npc) {
+        istemciye_hata(c, "İki NPC arasında takas olmaz; birinin envanterinden ötekine sürükle.");
+        return;
+    }
+    if (!ayni_haritada(a, b) || (!a->npc && !goruyor(a, b)) || (!b->npc && !goruyor(b, a))) {
+        istemciye_hata(c, "Takas için ikiniz aynı haritada olmalı ve birbirinizi görmelisiniz.");
+        return;
+    }
+    if (a->olu || b->olu) {
+        istemciye_hata(c, "Ölülerle takas olmaz; ölünün üstü aranır.");
+        return;
+    }
+    if (takas_kimin(a->id, NULL) || takas_kimin(b->id, NULL)) {
+        istemciye_hata(c, "Biriniz zaten bir takasta.");
+        return;
+    }
+    if (!b->npc && b->baglanti <= 0) {
+        istemciye_hata(c, "Karşı taraf şu an oyunda değil.");
+        return;
+    }
+    if (O.takas_n >= AZAMI_TAKAS) {
+        istemciye_hata(c, "Şu an çok fazla takas var; biraz bekle.");
+        return;
+    }
+    Takas *t = &O.takas[O.takas_n++];
+    memset(t, 0, sizeof *t);
+    t->id = ++O.takas_sayac;
+    kopyala(t->kim[0], ID_N, a->id);
+    kopyala(t->kim[1], ID_N, b->id);
+    char m[200];
+    snprintf(m, sizeof m, "%s seninle takas yapmak istiyor.", a->ad);
+    if (!b->npc) oyuncuya_bildir(b, "bilgi", m);
+    herkese_durum();
+}
+
+/* Bir tarafın teklifi: en fazla 4 yuva; her yuva bir eşya türü (adet) ya da para. Teklif değişince onaylar düşer. */
+static void m_takas_teklif(Istemci *c, Karakter *ben, const Json *j)
+{
+    long long id = 0;
+    json_tamsayi(j, "id", &id);
+    Takas *t = takas_bul(id);
+    int s = t ? takas_tarafi(c, ben, t) : -1;
+    if (s < 0) {
+        istemciye_hata(c, "Bu takas artık yok.");
+        return;
+    }
+    Karakter *k = karakter_bul(t->kim[s]);
+    Json *liste = json_al(j, "yuvalar");
+    if (!k || !liste || liste->tur != JSON_ARR || liste->adet > TAKAS_YUVA) return;
+    TakasYuvasi yeni[TAKAS_YUVA];
+    memset(yeni, 0, sizeof yeni);
+    int para_var = 0;
+    for (size_t i = 0; i < liste->adet; i++) {
+        const Json *y = liste->ogeler[i];
+        const char *tur = json_metin(y, "tur");
+        if (!tur) continue;
+        if (!strcmp(tur, "para")) {
+            double p = json_sayi(y, "para", 0);
+            if (para_var || !isfinite(p) || p < 1) continue;
+            if (p > k->o.para) {
+                istemciye_hata(c, "O kadar paran yok.");
+                return;
+            }
+            yeni[i].tur = 2;
+            yeni[i].para = (int)p;
+            para_var = 1;
+        } else if (!strcmp(tur, "esya")) {
+            Esya e;
+            if (!esya_yukle(json_al(y, "esya"), &e)) continue;
+            int adet;
+            if (!tamsayi_al(y, "adet", &adet) || adet < 1) adet = 1;
+            int var = esya_sayisi(&k->o, &e);
+            for (size_t m = 0; m < i; m++)
+                if (yeni[m].tur == 1 && esya_ayni(&yeni[m].e, &e)) var = -1;
+            if (var < 0) {
+                istemciye_hata(c, "Aynı eşyayı iki yuvaya koyma; adedini artır.");
+                return;
+            }
+            if (var < adet) {
+                istemciye_hata(c, var ? "O eşyadan o kadar yok." : "Bu eşya envanterinde yok.");
+                return;
+            }
+            yeni[i].tur = 1;
+            yeni[i].e = e;
+            yeni[i].adet = adet;
+        }
+    }
+    memcpy(t->yuva[s], yeni, sizeof yeni);
+    t->onay[0] = t->onay[1] = 0;
+    herkese_durum();
+}
+
+/* İki taraf da onaylayınca: teklifler hâlâ geçerliyse ve iki envanterde de yer varsa eşyalar ve para el değiştirir. */
+static void takas_yap(Takas *t)
+{
+    Karakter *k[2] = { karakter_bul(t->kim[0]), karakter_bul(t->kim[1]) };
+    const char *sorun = NULL;
+    if (!k[0] || !k[1] || k[0]->olu || k[1]->olu || !ayni_haritada(k[0], k[1])) sorun = "taraflardan biri artık takas yapamıyor";
+    int giden[2] = { 0, 0 };
+    for (int s = 0; s < 2 && !sorun; s++) {
+        int para = 0;
+        for (int i = 0; i < TAKAS_YUVA; i++) {
+            const TakasYuvasi *y = &t->yuva[s][i];
+            if (y->tur == 1) {
+                if (esya_sayisi(&k[s]->o, &y->e) < y->adet) sorun = "teklif edilen bir eşya artık envanterde yok";
+                giden[s] += y->adet;
+            } else if (y->tur == 2) {
+                para += y->para;
+            }
+        }
+        if (para > k[s]->o.para) sorun = "teklif edilen para artık yok";
+    }
+    for (int s = 0; s < 2 && !sorun; s++)
+        if (k[s]->o.envanter_adet - giden[s] + giden[1 - s] > ENVANTER_AZAMI) sorun = "bir tarafın envanterinde yer yok";
+    if (sorun) {
+        char m[200];
+        snprintf(m, sizeof m, "Takas yapılamadı: %s. Teklifleri düzeltip yeniden onaylayın.", sorun);
+        takas_bildir(t, m);
+        t->onay[0] = t->onay[1] = 0;
+        return;
+    }
+    /* Önce iki taraftan da çıkar, sonra karşıya ekle: yer sayımı yukarıda yapıldı */
+    Esya cikan[2][ENVANTER_AZAMI];
+    int cikan_n[2] = { 0, 0 };
+    Buf ozet[2];
+    for (int s = 0; s < 2; s++) {
+        buf_init(&ozet[s]);
+        for (int i = 0; i < TAKAS_YUVA; i++) {
+            const TakasYuvasi *y = &t->yuva[s][i];
+            if (y->tur == 1) {
+                int kalan = y->adet;
+                for (int m = k[s]->o.envanter_adet - 1; m >= 0 && kalan > 0; m--) {
+                    if (!esya_ayni(&k[s]->o.envanter[m], &y->e)) continue;
+                    cikan[s][cikan_n[s]++] = k[s]->o.envanter[m];
+                    envanter_cikar(&k[s]->o, m);
+                    kalan--;
+                }
+                buf_printf(&ozet[s], "%s%d × %s", ozet[s].len ? ", " : "", y->adet, y->e.ad);
+            } else if (y->tur == 2) {
+                k[s]->o.para -= y->para;
+                long long yeni = (long long)k[1 - s]->o.para + y->para;
+                k[1 - s]->o.para = (int)(yeni > AZAMI_PARA ? AZAMI_PARA : yeni);
+                if (ozet[s].len) buf_puts(&ozet[s], ", ");
+                para_yaz(&ozet[s], y->para);
+            }
+        }
+    }
+    for (int s = 0; s < 2; s++)
+        for (int i = 0; i < cikan_n[s]; i++) envantere_koy(k[1 - s], &cikan[s][i]);
+    char sahip[2 * ID_N + 4], m[1200];
+    snprintf(sahip, sizeof sahip, ",%s,%s,", k[0]->npc ? "-" : k[0]->id, k[1]->npc ? "-" : k[1]->id);
+    snprintf(m, sizeof m, "Takas: %s verdi: %s; %s verdi: %s", k[0]->ad, ozet[0].len ? ozet[0].p : "hiçbir şey", k[1]->ad,
+             ozet[1].len ? ozet[1].p : "hiçbir şey");
+    kayit_metin("esya", GOR_GM_SAHIP, sahip, m);
+    buf_free(&ozet[0]);
+    buf_free(&ozet[1]);
+    takas_bildir(t, "Takas tamamlandı.");
+    takas_kaldir(t);
+    kirlet();
+}
+
+static void m_takas_onay(Istemci *c, Karakter *ben, const Json *j)
+{
+    long long id = 0;
+    json_tamsayi(j, "id", &id);
+    Takas *t = takas_bul(id);
+    int s = t ? takas_tarafi(c, ben, t) : -1;
+    if (s < 0) {
+        istemciye_hata(c, "Bu takas artık yok.");
+        return;
+    }
+    t->onay[s] = json_mantik(j, "onay", 1);
+    if (t->onay[0] && t->onay[1]) takas_yap(t);
+    herkese_durum();
+}
+
+static void m_takas_iptal(Istemci *c, Karakter *ben, const Json *j)
+{
+    long long id = 0;
+    json_tamsayi(j, "id", &id);
+    Takas *t = takas_bul(id);
+    int s = t ? takas_tarafi(c, ben, t) : -1;
+    if (s < 0) return;
+    Karakter *karsi = karakter_bul(t->kim[1 - s]), *k = karakter_bul(t->kim[s]);
+    char m[200];
+    snprintf(m, sizeof m, "%s takastan vazgeçti.", k ? k->ad : "Karşı taraf");
+    if (karsi && !karsi->npc) oyuncuya_bildir(karsi, "bilgi", m);
+    takas_kaldir(t);
+    herkese_durum();
+}
+
+/* ------------------------------------------------------------------ portallar (GM) */
+
+/* GM baktığı haritada bir yere portal koydu; düzenleyicisini açabilsin diye kimliği ona döner. */
+static void m_portal_koy(Istemci *c, const Json *j)
+{
+    HaritaKaydi *h = aktif_harita();
+    float g, y;
+    if (!h || !harita_olcu(h, &g, &y)) {
+        istemciye_hata(c, "Önce bir harita aç.");
+        return;
+    }
+    if (h->portal_n >= AZAMI_PORTAL) {
+        istemciye_hata(c, "Bu haritada çok fazla portal var.");
+        return;
+    }
+    double x = json_sayi(j, "x", NAN), yy = json_sayi(j, "y", NAN);
+    if (!isfinite(x) || !isfinite(yy)) return;
+    hedefe_oturt(h, &x, &yy, g, y);
+    h->portal = xrealloc(h->portal, (size_t)(h->portal_n + 1) * sizeof *h->portal);
+    Portal *p = &h->portal[h->portal_n++];
+    memset(p, 0, sizeof *p);
+    p->id = ++O.yer_sayac;
+    snprintf(p->ad, sizeof p->ad, "Portal %d", h->portal_n);
+    p->x = (float)x;
+    p->y = (float)yy;
+    kirlet();
+    herkese_durum();
+    Buf b;
+    buf_init(&b);
+    buf_printf(&b, "{\"t\":\"portal_eklendi\",\"id\":%lld}", p->id);
+    gonder_buf(c, &b);
+    buf_free(&b);
+}
+
+/* Portalın adı, yeri ya da hedefi. Hedef: harita (""/null: bağlı değil) ve oradaki yer (hx, hy) ya da oradaki bir
+   portal (hedef_portal: o portalın yerine çıkar). */
+static void m_portal_guncelle(Istemci *c, const Json *j)
+{
+    HaritaKaydi *h = aktif_harita();
+    long long id = 0;
+    json_tamsayi(j, "id", &id);
+    int i = portal_sira(h, id);
+    if (i < 0) {
+        istemciye_hata(c, "Bu portal artık yok.");
+        return;
+    }
+    Portal *p = &h->portal[i];
+    const char *ad = json_metin(j, "ad");
+    char temiz[AD_N];
+    if (ad && metin_temizle(ad, temiz, sizeof temiz, 40)) kirp_onar(p->ad, sizeof p->ad, temiz);
+    double x = json_sayi(j, "x", NAN), yy = json_sayi(j, "y", NAN);
+    float g, y;
+    if (isfinite(x) && isfinite(yy) && harita_olcu(h, &g, &y)) {
+        hedefe_oturt(h, &x, &yy, g, y);
+        p->x = (float)x;
+        p->y = (float)yy;
+    }
+    Json *hd = json_al(j, "hedef");
+    if (hd && hd->tur == JSON_NULL) {
+        free(p->hedef);
+        p->hedef = NULL;
+    } else if (hd && hd->tur == JSON_STR) {
+        const char *dosya = hd->metin;
+        char yol[YOL_AZAMI], goreli[YOL_AZAMI];
+        GorselBilgi gb;
+        snprintf(goreli, sizeof goreli, "haritalar/%s", dosya);
+        if (!dosya[0]) {
+            free(p->hedef);
+            p->hedef = NULL;
+        } else if (!goreli_yol_gecerli(dosya) || !tam_yol_kur(yap.oyun_klasoru, goreli, yol, sizeof yol) || !gorsel_bilgi(yol, &gb)) {
+            istemciye_hata(c, "Hedef harita bulunamadı.");
+            return;
+        } else {
+            HaritaKaydi *hh = harita_bul(dosya, 1); /* h kayabilir: p'yi yeniden bul */
+            h = aktif_harita();
+            p = &h->portal[portal_sira(h, id)];
+            float hg = 0, hy2 = 0;
+            harita_olcu(hh, &hg, &hy2);
+            free(p->hedef);
+            p->hedef = xstrdup(hh->dosya);
+            long long hp = 0;
+            int k = json_tamsayi(j, "hedef_portal", &hp) ? portal_sira(hh, hp) : -1;
+            if (k >= 0) {
+                p->hx = hh->portal[k].x;
+                p->hy = hh->portal[k].y;
+            } else {
+                p->hx = (float)sinirla_d(json_sayi(j, "hx", hg / 2), 0, hg);
+                p->hy = (float)sinirla_d(json_sayi(j, "hy", hy2 / 2), 0, hy2);
+            }
+        }
+    }
+    kirlet();
+    herkese_durum();
+}
+
+static void m_portal_sil(const Json *j)
+{
+    HaritaKaydi *h = aktif_harita();
+    long long id = 0;
+    json_tamsayi(j, "id", &id);
+    int i = portal_sira(h, id);
+    if (i < 0) return;
+    free(h->portal[i].hedef);
+    memmove(&h->portal[i], &h->portal[i + 1], (size_t)(h->portal_n - i - 1) * sizeof *h->portal);
+    h->portal_n--;
     kirlet();
     herkese_durum();
 }
@@ -3827,15 +4629,16 @@ static void durum_yedekle(const char *ad)
     buf_free(&b);
 }
 
-/* Maçı sıfırlar: NPC'ler, oyuncuların statları, envanterleri (yumruk kalır), konumları, ölümleri, keşifler,
-   yerdeki eşyalar, tur sırası ve kayıt silinir. Ayarlar, haritaların boyutları ve oyuncuların kendileri
-   (adları, oturumları, görünümleri) kalır. Önceki hali durum-sifirlamadan-once.json'a yazılır. */
+/* Maçı sıfırlar: NPC'ler, oyuncuların statları, envanterleri (yumruk kalır), paraları, haritaları, ölümleri, keşifler,
+   yerdeki eşyalar, takaslar, tur sırası ve kayıt silinir. Ayarlar, haritaların boyutları, portallar ve oyuncuların
+   kendileri (adları, oturumları, görünümleri) kalır. Önceki hali durum-sifirlamadan-once.json'a yazılır. */
 static void m_mac_sifirla(void)
 {
     durum_yedekle("durum-sifirlamadan-once.json");
     O.sira.aktif = 0; /* NPC'ler silinirken sıra ilerlemesin */
     O.sira.indeks = -1;
     O.istek_var = 0;
+    O.takas_n = 0;
     for (int i = 0; i < O.kar_n;) {
         if (O.kar[i]->npc) {
             karakter_kaldir(O.kar[i]);
@@ -3847,20 +4650,19 @@ static void m_mac_sifirla(void)
         Karakter *k = O.kar[i];
         Oyuncu *o = &k->o;
         k->olu = 0;
-        k->yerde = 0;
+        harita_ata(k, NULL);
         o->x = o->y = 0;
         o->can = VARSAYILAN_CAN;
         o->odak = o->zirh = o->buyu_direnci = 0;
         o->enerji = O.ayar.tur_enerjisi;
+        o->kendi_agirligi = VARSAYILAN_AGIRLIK;
+        o->para = 0;
         o->envanter_adet = 0;
         yumruk_ver(o);
         agirlik_hesapla(o);
     }
     for (int i = 0; i < O.harita_n; i++) {
         HaritaKaydi *h = &O.harita[i];
-        free(h->konum);
-        h->konum = NULL;
-        h->konum_n = 0;
         for (int k = 0; k < h->bilgi_n; k++) bilgi_temizle(&h->bilgi[k]);
         free(h->bilgi);
         h->bilgi = NULL;
@@ -3925,16 +4727,27 @@ void istemci_mesaj(Istemci *c, const char *metin, size_t n)
         else if (!strcmp(t, "saldir")) m_saldir(c, ben, j);
         else if (!strcmp(t, "buyu")) m_buyu(c, ben, j);
         else if (!strcmp(t, "esya_yere")) m_esya_yere(c, ben, j);
+        else if (!strcmp(t, "esya_imha")) m_esya_imha(c, ben, j);
+        else if (!strcmp(t, "ganimet_bak")) m_ganimet_bak(c, ben, j);
+        else if (!strcmp(t, "ganimet_al")) m_ganimet_al(c, ben, j);
+        else if (!strcmp(t, "takas_baslat")) m_takas_baslat(c, ben, j);
+        else if (!strcmp(t, "takas_teklif")) m_takas_teklif(c, ben, j);
+        else if (!strcmp(t, "takas_onay")) m_takas_onay(c, ben, j);
+        else if (!strcmp(t, "takas_iptal")) m_takas_iptal(c, ben, j);
         else if (!strcmp(t, "gorunum")) m_gorunum(c, ben, j);
         else istemciye_hata(c, "Bunu yalnızca GM yapabilir.");
     } else if (!strcmp(t, "istek_onayla")) m_istek_onayla(c, j);
     else if (!strcmp(t, "istek_reddet")) m_istek_reddet(c, j);
     else if (!strcmp(t, "harita_ac")) m_harita_ac(c, j);
     else if (!strcmp(t, "harita_gizle")) {
-        O.gizli = json_mantik(j, "gizli", O.gizli);
-        if (O.gizli) istekleri_temizle(NULL);
-        kirlet();
-        herkese_durum();
+        HaritaKaydi *h = aktif_harita();
+        if (h) {
+            h->gizli = json_mantik(j, "gizli", h->gizli);
+            Karakter *ik = O.istek_var ? karakter_bul(O.istek.kim) : NULL;
+            if (h->gizli && ik && bu_haritada(ik, h->dosya)) istekleri_temizle(NULL);
+            kirlet();
+            herkese_durum();
+        }
     } else if (!strcmp(t, "izgara")) m_izgara(c, j);
     else if (!strcmp(t, "kesif_sifirla")) m_kesif_sifirla();
     else if (!strcmp(t, "tasi")) m_tasi(c, j);
@@ -3963,6 +4776,13 @@ void istemci_mesaj(Istemci *c, const char *metin, size_t n)
     else if (!strcmp(t, "esya_birak")) m_esya_birak(c, j);
     else if (!strcmp(t, "yer_esya_sil")) m_yer_esya_sil(j);
     else if (!strcmp(t, "gorunum")) m_gorunum(c, ben, j);
+    else if (!strcmp(t, "takas_baslat")) m_takas_baslat(c, ben, j);
+    else if (!strcmp(t, "takas_teklif")) m_takas_teklif(c, ben, j);
+    else if (!strcmp(t, "takas_onay")) m_takas_onay(c, ben, j);
+    else if (!strcmp(t, "takas_iptal")) m_takas_iptal(c, ben, j);
+    else if (!strcmp(t, "portal_koy")) m_portal_koy(c, j);
+    else if (!strcmp(t, "portal_guncelle")) m_portal_guncelle(c, j);
+    else if (!strcmp(t, "portal_sil")) m_portal_sil(j);
     else if (!strcmp(t, "mac_sifirla")) m_mac_sifirla();
     else if (!strcmp(t, "ayarlar")) m_ayarlar(c, j);
     else if (!strcmp(t, "oyuncu_sil")) m_oyuncu_sil(j);
@@ -3974,16 +4794,21 @@ son:
 
 int oyuncu_dosya_izni(const char *oyuncu, const char *goreli)
 {
-    if (O.aktif && !O.gizli && !strncmp(goreli, "haritalar/", 10) && !strcmp(goreli + 10, O.aktif)) return 1;
     /* Token resimleri ve şapkalar herkesin seçebileceği görseller */
     if (!strncmp(goreli, "tokenlar/", 9) || !strncmp(goreli, "sapkalar/", 9)) return 1;
     Karakter *k = karakter_bul(oyuncu);
     if (!k || k->npc) return 0;
+    HaritaKaydi *h = haritasi(k);
+    /* Kendi haritasının resmi (gizli değilse) */
+    if (h && !h->gizli && !strncmp(goreli, "haritalar/", 10) && !strcmp(goreli + 10, h->dosya)) return 1;
     for (int i = 0; i < k->o.envanter_adet; i++)
         if (!strcmp(k->o.envanter[i].resim, goreli)) return 1;
-    HaritaKaydi *h = aktif_harita();
+    /* Yerde gördüğü ya da gördüğünü hatırladığı eşyalar */
     for (int i = 0; h && i < h->yer_n; i++)
-        if (!strcmp(h->yer[i].e.resim, goreli) && yer_goruyor(k, &h->yer[i])) return 1;
+        if (!strcmp(h->yer[i].e.resim, goreli) && yer_goruyor(k, h, &h->yer[i])) return 1;
+    Bilgi *bl = h ? bilgi_bul(h, k->id, 0) : NULL;
+    for (int i = 0; bl && i < bl->esya_n; i++)
+        if (!strcmp(bl->esya[i].e.resim, goreli)) return 1;
     long long simdi = simdi_sn();
     for (int i = 0; i < O.izin_n; i++)
         if (O.izin[i].bitis >= simdi && !strcmp(O.izin[i].oyuncu, oyuncu) && !strcmp(O.izin[i].resim, goreli)) return 1;
@@ -4040,8 +4865,12 @@ void dosya_tasindi(const char *eski, const char *yeni)
         gorunum_yolu_degisti(kr->resim, sizeof kr->resim, "tokenlar", eski, yeni);
         gorunum_yolu_degisti(kr->sapka, sizeof kr->sapka, "sapkalar", eski, yeni);
     }
-    for (int i = 0; i < O.harita_n; i++)
-        for (int k = 0; k < O.harita[i].yer_n; k++) esya_yolu_degisti(&O.harita[i].yer[k].e, eski, yeni);
+    for (int i = 0; i < O.harita_n; i++) {
+        HaritaKaydi *h = &O.harita[i];
+        for (int k = 0; k < h->yer_n; k++) esya_yolu_degisti(&h->yer[k].e, eski, yeni);
+        for (int b = 0; b < h->bilgi_n; b++)
+            for (int k = 0; k < h->bilgi[b].esya_n; k++) esya_yolu_degisti(&h->bilgi[b].esya[k].e, eski, yeni);
+    }
     /* Haritalar */
     char tam[YOL_AZAMI * 2];
     for (int i = 0; i < O.harita_n;) {
@@ -4064,13 +4893,17 @@ void dosya_tasindi(const char *eski, const char *yeni)
                 if (j < i) i--;
                 h = &O.harita[i];
             }
-            for (int k = 0; k < O.kar_n; k++) {
-                Karakter *kr = O.kar[k];
-                if (kr->npc && kr->harita && !strcmp(kr->harita, h->dosya)) {
-                    free(kr->harita);
-                    kr->harita = xstrdup(yd);
+            for (int k = 0; k < O.kar_n; k++)
+                if (bu_haritada(O.kar[k], h->dosya)) harita_ata(O.kar[k], yd);
+            /* Buraya çıkan portallar yeni adı göstersin */
+            for (int m = 0; m < O.harita_n; m++)
+                for (int k = 0; k < O.harita[m].portal_n; k++) {
+                    Portal *p = &O.harita[m].portal[k];
+                    if (p->hedef && !strcmp(p->hedef, h->dosya)) {
+                        free(p->hedef);
+                        p->hedef = xstrdup(yd);
+                    }
                 }
-            }
             free(h->dosya);
             h->dosya = xstrdup(yd);
             h->gen = 0;
@@ -4088,7 +4921,8 @@ void dosya_tasindi(const char *eski, const char *yeni)
     }
     if (O.aktif && !harita_bul(O.aktif, 0)) aktif_degistir(NULL);
     Karakter *s = siradaki();
-    if (s && !sahnede(s)) sira_ilerle();
+    if (s && !haritada(s)) sira_ilerle();
+    bilgileri_guncelle();
     herkese_durum();
 }
 
@@ -4100,10 +4934,11 @@ void dosyalar_degisti(void)
 
 /* ================================================================== kalıcılık (durum.json) */
 
-/* durum.json biçimi: 2 = yerleşik yumruk, eşya ağırlıkları, yerdeki eşyalar, genel görüş */
-#define DURUM_SURUMU 2
+/* durum.json biçimi: 2 = yerleşik yumruk, eşya ağırlıkları, yerdeki eşyalar, genel görüş;
+   3 = her karakterin kendi haritası, para, dayanıklılık, kendi ağırlığı, portallar, eşya hafızası */
+#define DURUM_SURUMU 3
 
-/* {"ad":..,"sinif":..,"resim":..,"agirlik":..} */
+/* {"ad":..,"sinif":..,"resim":..,"agirlik":..,"dayaniklilik":..} */
 static void esya_kaydi_yaz(Buf *b, const Esya *e)
 {
     buf_puts(b, "{\"ad\":");
@@ -4113,12 +4948,12 @@ static void esya_kaydi_yaz(Buf *b, const Esya *e)
     buf_puts(b, ",\"resim\":");
     buf_json_str(b, e->resim);
     sayi_alani(b, "agirlik", e->agirlik);
+    sayi_alani(b, "dayaniklilik", e->dayaniklilik);
     buf_putc(b, '}');
 }
 
 static void durum_json_yaz(Buf *b)
 {
-    konumlari_kaydet();
     buf_printf(b, "{\"surum\":%d,\"sayac\":%lld,\"ayarlar\":{\"oyun_adi\":", DURUM_SURUMU, O.sayac);
     buf_json_str(b, O.ayar.oyun_adi);
     buf_puts(b, ",\"sifre\":");
@@ -4132,12 +4967,10 @@ static void durum_json_yaz(Buf *b)
         buf_json_str(b, k->id);
         buf_puts(b, ",\"ad\":");
         buf_json_str(b, k->ad);
-        buf_printf(b, ",\"renk\":\"%s\",\"npc\":%s,\"gizli\":%s,\"olu\":%s", k->renk, k->npc ? "true" : "false",
-                   k->gizli ? "true" : "false", k->olu ? "true" : "false");
-        if (k->npc) {
-            buf_puts(b, ",\"harita\":");
-            buf_json_str(b, k->harita ? k->harita : "");
-        }
+        buf_printf(b, ",\"renk\":\"%s\",\"npc\":%s,\"gizli\":%s,\"olu\":%s,\"para\":%d,\"harita\":", k->renk,
+                   k->npc ? "true" : "false", k->gizli ? "true" : "false", k->olu ? "true" : "false", k->o.para);
+        if (k->harita) buf_json_str(b, k->harita);
+        else buf_puts(b, "null");
         sayi_alani(b, "x", k->o.x);
         sayi_alani(b, "y", k->o.y);
         buf_puts(b, ",\"resim\":");
@@ -4164,21 +4997,14 @@ static void durum_json_yaz(Buf *b)
     buf_puts(b, "],\n\"aktif_harita\":");
     if (O.aktif) buf_json_str(b, O.aktif);
     else buf_puts(b, "null");
-    buf_printf(b, ",\"harita_gizli\":%s,\n\"haritalar\":[", O.gizli ? "true" : "false");
+    buf_puts(b, ",\n\"haritalar\":[");
     for (int i = 0; i < O.harita_n; i++) {
         HaritaKaydi *h = &O.harita[i];
         buf_puts(b, i ? ",\n{\"dosya\":" : "\n{\"dosya\":");
         buf_json_str(b, h->dosya);
-        buf_puts(b, ",\"izgara\":");
+        buf_printf(b, ",\"gizli\":%s,\"izgara\":", h->gizli ? "true" : "false");
         izgara_json(b, &h->iz);
-        buf_puts(b, ",\"konum\":[");
-        for (int k = 0; k < h->konum_n; k++) {
-            buf_printf(b, "%s{\"oyuncu\":\"%s\",\"x\":", k ? "," : "", h->konum[k].oyuncu);
-            sayi_yaz(b, h->konum[k].x);
-            sayi_alani(b, "y", h->konum[k].y);
-            buf_putc(b, '}');
-        }
-        buf_puts(b, "],\"bilgi\":[");
+        buf_puts(b, ",\"bilgi\":[");
         for (int k = 0; k < h->bilgi_n; k++) {
             Bilgi *bl = &h->bilgi[k];
             buf_printf(b, "%s\n{\"oyuncu\":\"%s\",\"kesif\":[", k ? "," : "", bl->oyuncu);
@@ -4191,16 +5017,40 @@ static void durum_json_yaz(Buf *b)
                 sayi_alani(b, "y", e->y);
                 buf_printf(b, ",\"olu\":%s}", e->olu > 0 ? "true" : "false");
             }
+            buf_puts(b, "],\"esyalar\":[");
+            for (int m = 0; m < bl->esya_n; m++) {
+                const BilinenEsya *e = &bl->esya[m];
+                buf_printf(b, "%s{\"id\":%lld,\"x\":", m ? "," : "", e->id);
+                sayi_yaz(b, e->x);
+                sayi_alani(b, "y", e->y);
+                buf_puts(b, ",\"esya\":");
+                esya_kaydi_yaz(b, &e->e);
+                buf_putc(b, '}');
+            }
             buf_puts(b, "]}");
         }
         buf_puts(b, "],\"yer\":[");
         for (int k = 0; k < h->yer_n; k++) {
             const YerEsyasi *ye = &h->yer[k];
-            buf_printf(b, "%s{\"x\":", k ? "," : "");
+            buf_printf(b, "%s{\"id\":%lld,\"x\":", k ? "," : "", ye->id);
             sayi_yaz(b, ye->x);
             sayi_alani(b, "y", ye->y);
             buf_puts(b, ",\"esya\":");
             esya_kaydi_yaz(b, &ye->e);
+            buf_putc(b, '}');
+        }
+        buf_puts(b, "],\"portal\":[");
+        for (int k = 0; k < h->portal_n; k++) {
+            const Portal *p = &h->portal[k];
+            buf_printf(b, "%s{\"id\":%lld,\"ad\":", k ? "," : "", p->id);
+            buf_json_str(b, p->ad);
+            sayi_alani(b, "x", p->x);
+            sayi_alani(b, "y", p->y);
+            buf_puts(b, ",\"hedef\":");
+            if (p->hedef) buf_json_str(b, p->hedef);
+            else buf_puts(b, "null");
+            sayi_alani(b, "hx", p->hx);
+            sayi_alani(b, "hy", p->hy);
             buf_putc(b, '}');
         }
         buf_puts(b, "]}");
@@ -4225,13 +5075,14 @@ static float json_float(const Json *o, const char *ad, float varsayilan, double 
     return (float)sinirla_d(json_sayi(o, ad, varsayilan), lo, hi);
 }
 
-/* Kayıttaki bir eşya; ağırlığı yoksa 1 */
+/* Kayıttaki (ya da takas teklifindeki) bir eşya; ağırlığı yoksa 1, dayanıklılığı yoksa 100 */
 static int esya_yukle(const Json *o, Esya *e)
 {
     const char *ad = json_metin(o, "ad");
     if (!ad) return 0;
     esya_doldur(e, ad, json_metin(o, "sinif"), json_metin(o, "resim"));
     e->agirlik = json_float(o, "agirlik", 1, 0, AZAMI_STAT);
+    e->dayaniklilik = json_float(o, "dayaniklilik", VARSAYILAN_DAYANIKLILIK, -AZAMI_STAT, AZAMI_STAT);
     return 1;
 }
 
@@ -4282,6 +5133,8 @@ static void durum_yukle(const Json *d)
     if ((s = json_metin(a, "gm_tuz")) && strlen(s) == 32) kopyala(O.ayar.gm_tuz, sizeof O.ayar.gm_tuz, s);
     if ((s = json_metin(a, "gm_iz")) && strlen(s) == 40) kopyala(O.ayar.gm_iz, sizeof O.ayar.gm_iz, s);
     if (json_tamsayi(d, "sayac", &v)) O.sayac = v;
+    /* surum < 3: tek bir açık harita vardı; oyuncular orada (konum kaydı olanlar) */
+    const char *eski_aktif = json_metin(d, "aktif_harita");
 
     const Json *kl = json_al(d, "karakterler");
     for (size_t i = 0; kl && kl->tur == JSON_ARR && i < kl->adet; i++) {
@@ -4291,10 +5144,12 @@ static void durum_yukle(const Json *d)
         if (!id_gecerli(id) || !ad || !metin_temizle(ad, temiz, sizeof temiz, 24) || karakter_bul(id)) continue;
         if (!npc && oyuncu_sayisi() >= AZAMI_OYUNCU) continue;
         const char *hd = json_metin(o, "harita");
-        if (npc && (!hd || !hd[0] || !goreli_yol_gecerli(hd))) continue;
+        int hd_gecerli = hd && hd[0] && goreli_yol_gecerli(hd);
+        if (npc && !hd_gecerli) continue;
         Karakter *k = karakter_olustur(npc, id, temiz, renk_gecerli(renk) ? renk : npc ? NPC_RENK[0] : OYUNCU_RENK[0]);
         if (!k) break;
-        if (npc) k->harita = xstrdup(hd);
+        if (hd_gecerli && (npc || surum >= 3)) k->harita = xstrdup(hd);
+        k->o.para = (int)sinirla_d(round(json_sayi(o, "para", 0)), 0, AZAMI_PARA);
         k->gizli = npc && json_mantik(o, "gizli", 0);
         k->olu = json_mantik(o, "olu", 0);
         k->o.x = json_float(o, "x", 0.5f, 0, AZAMI_STAT);
@@ -4329,13 +5184,19 @@ static void durum_yukle(const Json *d)
         if (!dosya || !dosya[0] || !goreli_yol_gecerli(dosya) || harita_bul(dosya, 0)) continue;
         HaritaKaydi *h = harita_bul(dosya, 1);
         izgara_yukle(h, json_al(o, "izgara"));
-        const Json *konl = json_al(o, "konum");
-        for (size_t k = 0; konl && konl->tur == JSON_ARR && k < konl->adet; k++) {
-            const char *oyuncu = json_metin(konl->ogeler[k], "oyuncu");
-            Karakter *kr = karakter_bul(oyuncu);
-            if (!kr || kr->npc || konum_bul(h, oyuncu)) continue;
-            konum_yaz(h, oyuncu, json_float(konl->ogeler[k], "x", 0, 0, AZAMI_STAT),
-                      json_float(konl->ogeler[k], "y", 0, 0, AZAMI_STAT));
+        h->gizli = json_mantik(o, "gizli", 0);
+        int eskiden_aktif = surum < 3 && eski_aktif && !strcmp(eski_aktif, dosya);
+        if (eskiden_aktif) {
+            h->gizli = json_mantik(d, "harita_gizli", 0);
+            /* Eski açık haritada yeri kayıtlı oyuncular bu haritada kalır; öteki haritalardaki yerleri unutulur */
+            const Json *konl = json_al(o, "konum");
+            for (size_t k = 0; konl && konl->tur == JSON_ARR && k < konl->adet; k++) {
+                Karakter *kr = karakter_bul(json_metin(konl->ogeler[k], "oyuncu"));
+                if (!kr || kr->npc || kr->harita) continue;
+                kr->harita = xstrdup(h->dosya);
+                kr->o.x = json_float(konl->ogeler[k], "x", 0, 0, AZAMI_STAT);
+                kr->o.y = json_float(konl->ogeler[k], "y", 0, 0, AZAMI_STAT);
+            }
         }
         const Json *bil = json_al(o, "bilgi");
         for (size_t k = 0; bil && bil->tur == JSON_ARR && k < bil->adet; k++) {
@@ -4370,26 +5231,70 @@ static void durum_yukle(const Json *d)
                 be->y = json_float(e, "y", 0, -AZAMI_STAT, AZAMI_STAT);
                 be->olu = json_mantik(e, "olu", 0);
             }
+            const Json *es = json_al(bo, "esyalar");
+            for (size_t m = 0; es && es->tur == JSON_ARR && m < es->adet && bl->esya_n < AZAMI_BILINEN_ESYA; m++) {
+                const Json *e = es->ogeler[m];
+                YerEsyasi ye;
+                if (!json_tamsayi(e, "id", &ye.id) || ye.id <= 0 || !esya_yukle(json_al(e, "esya"), &ye.e)) continue;
+                ye.x = json_float(e, "x", 0, 0, AZAMI_HARITA);
+                ye.y = json_float(e, "y", 0, 0, AZAMI_HARITA);
+                bilinen_esya_yaz(bl, &ye);
+                if (ye.id > O.yer_sayac) O.yer_sayac = ye.id;
+            }
         }
         const Json *yer = json_al(o, "yer");
         for (size_t k = 0; yer && yer->tur == JSON_ARR && k < yer->adet; k++) {
             const Json *yo = yer->ogeler[k];
             Esya e;
+            long long id;
             if (!esya_yukle(json_al(yo, "esya"), &e)) continue;
-            yere_koy(h, &e, json_float(yo, "x", 0, 0, AZAMI_HARITA), json_float(yo, "y", 0, 0, AZAMI_HARITA));
+            YerEsyasi *ye = yere_koy(h, &e, json_float(yo, "x", 0, 0, AZAMI_HARITA), json_float(yo, "y", 0, 0, AZAMI_HARITA));
+            if (ye && json_tamsayi(yo, "id", &id) && id > 0 && yer_esyasi_sira(h, id) < 0) {
+                ye->id = id; /* oyuncuların hafızası bu kimliği tutar */
+                if (id > O.yer_sayac) O.yer_sayac = id;
+            }
+        }
+        const Json *pl = json_al(o, "portal");
+        for (size_t k = 0; pl && pl->tur == JSON_ARR && k < pl->adet && h->portal_n < AZAMI_PORTAL; k++) {
+            const Json *po = pl->ogeler[k];
+            long long id;
+            h->portal = xrealloc(h->portal, (size_t)(h->portal_n + 1) * sizeof *h->portal);
+            Portal *p = &h->portal[h->portal_n++];
+            memset(p, 0, sizeof *p);
+            p->id = json_tamsayi(po, "id", &id) && id > 0 && portal_sira(h, id) < 0 ? id : 0;
+            if (p->id > O.yer_sayac) O.yer_sayac = p->id;
+            kirp_onar(p->ad, sizeof p->ad, json_metin(po, "ad") ? json_metin(po, "ad") : "Portal");
+            p->x = json_float(po, "x", 0, 0, AZAMI_HARITA);
+            p->y = json_float(po, "y", 0, 0, AZAMI_HARITA);
+            const char *hedef = json_metin(po, "hedef");
+            if (hedef && hedef[0] && goreli_yol_gecerli(hedef)) p->hedef = xstrdup(hedef);
+            p->hx = json_float(po, "hx", 0, 0, AZAMI_HARITA);
+            p->hy = json_float(po, "hy", 0, 0, AZAMI_HARITA);
         }
     }
-    /* Haritası olmayan NPC'ler düşer */
+    /* Kimliği olmayan portallar (bozuk kayıt) yeni kimlik alır; hedef haritası kalmayanlar bağlantısız kalır */
+    for (int i = 0; i < O.harita_n; i++)
+        for (int k = 0; k < O.harita[i].portal_n; k++) {
+            Portal *p = &O.harita[i].portal[k];
+            if (!p->id) p->id = ++O.yer_sayac;
+            if (p->hedef && !harita_bul(p->hedef, 0)) {
+                free(p->hedef);
+                p->hedef = NULL;
+            }
+        }
+    /* Haritası olmayan NPC'ler düşer; oyuncular hiçbir haritada kalmaz */
     for (int i = 0; i < O.kar_n;) {
         Karakter *k = O.kar[i];
-        if (k->npc && !harita_bul(k->harita, 0)) {
-            karakter_kaldir(k);
-            continue;
+        if (k->harita && !harita_bul(k->harita, 0)) {
+            if (k->npc) {
+                karakter_kaldir(k);
+                continue;
+            }
+            harita_ata(k, NULL);
         }
         i++;
     }
-    if ((s = json_metin(d, "aktif_harita")) && harita_bul(s, 0)) O.aktif = xstrdup(s);
-    O.gizli = json_mantik(d, "harita_gizli", 0);
+    if (eski_aktif && harita_bul(eski_aktif, 0)) O.aktif = xstrdup(eski_aktif);
 
     const Json *sr = json_al(d, "sira");
     const Json *liste = json_al(sr, "liste");
@@ -4552,7 +5457,7 @@ void oyun_baslat(void)
     if (O.ayar.sifre[0] && !strcmp(O.ayar.sifre, yap.gm_sifresi))
         fprintf(stderr, "UYARI: oyun şifresi GM şifresiyle aynı. GM ekranındaki Ayarlar'dan oyun şifresini değiştir.\n");
     if (O.sira.aktif) kayit_metin("sira", GOR_GM, NULL, "Sunucu yeniden başladı; tur sırası kaldığı yerden sürüyor.");
-    konumlari_yukle();
+    for (int i = 0; i < O.harita_n; i++) sinirlara_al(&O.harita[i]);
     bilgileri_guncelle();
     O.kirli = 1;
 }

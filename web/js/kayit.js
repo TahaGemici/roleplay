@@ -1,5 +1,6 @@
 import { h, saat, azHareket } from './ortak.js';
 import { zarSimgesi } from './zar-sekilleri.js';
+import { ses } from './ses.js';
 
 const AZAMI = 300;
 
@@ -80,6 +81,8 @@ export function kayitOlustur(liste) {
       h('span', { class: 'sr-only', text: okunan }),
     );
 
+    if (canli) ses.zar();
+    if (canli && dogal === 20) ses.kritik(0.45); /* kartın parlamasıyla birlikte */
     if (canli && !azHareket()) {
       kart.classList.add('is-rolling');
       const [en, ust] = aralik(s);

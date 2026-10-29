@@ -1,4 +1,5 @@
 import { h, azHareket } from './ortak.js';
+import { ses } from './ses.js';
 
 /*
  * Saldırı ve ölüm animasyonları. Haritanın verdiği bağlamla çalışır:
@@ -122,6 +123,7 @@ export function saldiriOynat(ctx, m) {
     carpma = 190;
   }
 
+  if (buyu) ses.buyuYap();
   if (kendine && H && !az) {
     halka(ctx, H.x, H.y, s * 1.2, 'is-magic');
     carpma = 260;
@@ -142,6 +144,7 @@ export function saldiriOynat(ctx, m) {
     );
     anim.onfinish = () => el.remove();
     anim.oncancel = () => el.remove();
+    ses.kure(0.12, sure);
     carpma = 120 + sure;
   } else if (A && H && !az) {
     const mesafe = Math.hypot(H.x - A.x, H.y - A.y) / s;
@@ -162,6 +165,7 @@ export function saldiriOynat(ctx, m) {
         ],
         { duration: 420, delay: 70, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'both' },
       );
+      ses.savurma(0.07);
       carpma = 290;
     } else {
       /* Uzak: eşya hedefe uçar */
@@ -175,6 +179,7 @@ export function saldiriOynat(ctx, m) {
         { duration: sure, delay: 110, easing: 'cubic-bezier(.35,.1,.7,1)', fill: 'both' },
       );
       anim.addEventListener('finish', () => el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 120, fill: 'forwards' }));
+      ses.firlatma(0.11, sure);
       carpma = 110 + sure;
     }
     anim.onfinish = () => setTimeout(() => el.remove(), 130);
@@ -184,6 +189,8 @@ export function saldiriOynat(ctx, m) {
   if (H) {
     setTimeout(() => {
       const iyilesme = typeof m.hasar === 'number' && m.hasar < 0;
+      if (buyu) (iyilesme && m.isabet ? ses.iyiles : ses.buyuCarp)();
+      else (m.isabet ? ses.isabet : ses.iska)();
       if (hGovde && m.isabet && iyilesme) {
         hGovde.animate(
           [
@@ -245,6 +252,7 @@ export function olumOynat(ctx, id, bitti) {
     return;
   }
   const s = ctx.boyut();
+  ses.olum();
   if (!azHareket()) {
     halka(ctx, P.x, P.y, s * 1.3, 'is-death');
     kivilcimlar(ctx, P.x, P.y, s * 1.1, '#8a1f14');
@@ -267,4 +275,12 @@ export function olumOynat(ctx, id, bitti) {
   };
   anim.onfinish = son;
   setTimeout(son, 1600); /* sekme arka plandaysa animasyon beklemeye kalabilir */
+}
+
+/** Portal: geçilen ya da varılan yerde dönen bir halka ve parıltılar. P: dünya pikseli. */
+export function portalOynat(ctx, P, varis) {
+  if (!P || azHareket()) return;
+  const s = ctx.boyut();
+  halka(ctx, P.x, P.y, s * (varis ? 1.4 : 1.1), 'is-portal');
+  kivilcimlar(ctx, P.x, P.y, s * 0.9, '#8fd3ff');
 }

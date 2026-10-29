@@ -5,7 +5,7 @@
 #include <string.h>
 
 const char *const esya_siniflari[] = { "silah", "iksir", "../kotu", NULL };
-const Esya yumruk = { .ad = "Yumruk", .sinif = "silah" };
+const Esya yumruk = { .ad = "Yumruk", .sinif = "silah", .dayaniklilik = 100 };
 const char *const buyuler[] = { "Şifa", "Yıldırım", NULL };
 
 void her_tur(Oyuncu *o)

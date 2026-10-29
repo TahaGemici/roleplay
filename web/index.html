@@ -52,6 +52,7 @@
       <h1 class="scene-title" id="sahne-adi"></h1>
       <button class="btn btn-sm gm-only" id="dosyalar-ac" type="button">Dosyalar</button>
       <ul class="presence" id="kimler" aria-label="Oyundakiler"></ul>
+      <button class="btn btn-ghost btn-sm sound-btn" id="ses" type="button" aria-pressed="true">🔊</button>
       <button class="btn btn-ghost btn-sm" id="cikis" type="button">Çıkış</button>
       <button class="btn btn-ghost btn-sm only-narrow" id="ac-yan" type="button" aria-controls="yan" aria-expanded="false"><span id="ac-yan-metin">Sıra ve zar</span> <span class="badge" id="rozet" hidden></span></button>
     </header>
@@ -72,6 +73,11 @@
             <p class="hint">Açıkken her oyuncu yalnızca görüş menzilindekini görür. Daha önce gördüğü yerler eski haliyle, karartılmış durur; oradaki değişikliği görmez. Görüş menzili herkes için aynıdır; Ayarlar'dan değiştirilir.</p>
             <label class="check"><input type="checkbox" id="halkalar"> Oyuncuların görüş halkalarını göster (yalnızca sen)</label>
             <button class="btn btn-sm btn-danger" id="kesif-sifirla" type="button">Bu haritada keşfi sıfırla</button>
+          </div>
+          <div class="sub-sec" id="portal-ayar">
+            <h3 class="sub-title">Portallar</h3>
+            <p class="hint">Portalı haritaya sürükleyip bırak, sonra nereye çıkacağını seç. Yürüyüşü portalda biten oyuncu o haritaya geçer. Portala tıklayınca düzenlenir, sürükleyince taşınır.</p>
+            <button class="btn portal-chip" id="portal-koy" type="button"><span class="portal-swirl" aria-hidden="true"></span> Portal (haritaya sürükle)</button>
           </div>
           <div class="sub-sec" id="izgara-ayar">
             <h3 class="sub-title">Harita boyutu</h3>
@@ -134,8 +140,17 @@
               </div>
               <label class="check"><input type="checkbox" id="kd-gizli"> Oyunculardan gizle</label>
             </div>
+            <p class="hint" id="kd-harita"></p>
             <div class="stat-edit" id="kd-statlar"></div>
-            <p class="hint">Ağırlık (taşıdığı yük, eşyalardan gelir): <b id="kd-agirlik"></b></p>
+            <p class="hint">Toplam ağırlık (kendi ağırlığı ve eşyaları): <b id="kd-agirlik"></b></p>
+            <div class="field">
+              <span class="field-label">Para</span>
+              <div class="coins">
+                <label class="coin"><input class="input" id="kd-para-altin" type="number" min="0" step="1" inputmode="numeric"><span>altın</span></label>
+                <label class="coin"><input class="input" id="kd-para-gumus" type="number" min="0" step="1" inputmode="numeric"><span>gümüş</span></label>
+                <label class="coin"><input class="input" id="kd-para-bakir" type="number" min="0" step="1" inputmode="numeric"><span>bakır</span></label>
+              </div>
+            </div>
             <div class="row-2" id="kd-islemler"></div>
             <div class="sub-head">
               <h3 class="sub-title">Envanter</h3>
@@ -181,7 +196,7 @@
           </div>
           <div class="sub-sec">
             <h3 class="sub-title">Maç</h3>
-            <p class="hint">Yeni bir maç için: NPC'ler, statlar, envanterler, konumlar, keşifler, yerdeki eşyalar, tur sırası ve kayıt silinir; oyuncular, ayarlar ve haritalar kalır.</p>
+            <p class="hint">Yeni bir maç için: NPC'ler, statlar, envanterler, paralar, konumlar, keşifler, yerdeki eşyalar, takaslar, tur sırası ve kayıt silinir; oyuncular, ayarlar, haritalar ve portallar kalır.</p>
             <button class="btn btn-danger" id="mac-sifirla" type="button">Maçı sıfırla</button>
           </div>
         </div>
@@ -193,6 +208,7 @@
         <div class="world" id="dunya" hidden>
           <img class="map-img" id="harita-resim" alt="" draggable="false" decoding="async">
           <div class="grid" id="izgara" hidden></div>
+          <div class="portals" id="portallar"></div>
           <div class="ground" id="yerdekiler"></div>
           <div class="tokens" id="tokenler"></div>
           <canvas class="fog" id="sis" hidden></canvas>
@@ -267,6 +283,29 @@
       <div class="drop-hint" id="dosya-birak" hidden>Bırak; bu klasöre yüklensin</div>
     </div>
     <p class="files-foot" id="dosya-durum"></p>
+  </dialog>
+
+  <!-- Takas: solda kendi teklifin, sağda karşı tarafın; iki taraf da onaylayınca olur -->
+  <dialog class="modal trade" id="takas" aria-labelledby="takas-baslik">
+    <div class="modal-body">
+      <h2 class="modal-title" id="takas-baslik">Takas</h2>
+      <p class="modal-text">En fazla 4 çeşit eşya ya da para koyabilirsin. Karşı taraf yalnızca ortaya koyduklarını görür. Teklif değişince onaylar düşer.</p>
+      <div class="trade-cols">
+        <section class="trade-side is-mine">
+          <h3 class="sub-title" id="takas-sol">Senin teklifin</h3>
+          <ol class="trade-slots" id="takas-benim"></ol>
+        </section>
+        <section class="trade-side">
+          <h3 class="sub-title" id="takas-sag">Karşı taraf</h3>
+          <ol class="trade-slots" id="takas-onun"></ol>
+        </section>
+      </div>
+      <p class="trade-status" id="takas-durum" role="status"></p>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="takas-vazgec" type="button">Vazgeç</button>
+        <button class="btn btn-primary" id="takas-onay" type="button">Onayla</button>
+      </div>
+    </div>
   </dialog>
 
   <!-- Genel pencereler -->

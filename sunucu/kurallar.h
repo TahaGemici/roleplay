@@ -20,6 +20,11 @@
    azaltırsan kayıtlı oyunda fazla gelen eşyalar düşer. */
 #define ENVANTER_AZAMI 12
 
+/* Para bakır cinsinden tutulur: o->para += 3 * ALTIN + 10 * GUMUS; */
+#define BAKIR 1
+#define GUMUS 4
+#define ALTIN 200
+
 /* ------------------------------------------------------------------ eşya */
 
 typedef struct {
@@ -29,6 +34,8 @@ typedef struct {
                         "esyalar/silah/Uzun_Kilic.png". Resim dosyası her boyutta olabilir. */
     float agirlik;   /* eşyanın ağırlığı. GM bir eşya verdiğinde 1'dir; GM envanterde değiştirebilir, sen de
                         değiştirebilirsin. */
+    float dayaniklilik; /* yeni eşyada 100. Sunucu buna hiç dokunmaz: azaltmak, 0'a inince eşyayı kırmak
+                           (envanter_cikar) kurallarının işi. GM de değiştirebilir. */
     int sabit;       /* 1: herkeste olan yumruk (envanter[0]); bırakılamaz, çıkarılamaz. Salt okunur. */
 } Esya;
 
@@ -46,8 +53,10 @@ typedef struct {
     float buyu_direnci;
     float enerji;       /* aksiyon puanı. Ne kadar harcanacağını hareket(), saldiri() ve buyu() içinde sen
                            belirlersin; 0 ya da altına inince sıra geçer. */
-    float agirlik;      /* taşıdığı yük: envanterdeki eşyaların ağırlıkları toplamı. Sunucu hesaplar (salt
-                           okunur); arttıkça haritadaki pulu büyür. */
+    float kendi_agirligi; /* karakterin kendi ağırlığı (eşyasız). Yeni karakterde 70; GM ve sen değiştirebilirsiniz. */
+    float agirlik;      /* toplam ağırlık: kendi_agirligi + eşyalarının ağırlıkları. Sunucu hesaplar (salt okunur);
+                           arttıkça haritadaki pulu büyür (70'te 1 kat, 140'ta 2 kat). */
+    int para;           /* parası, bakır cinsinden: 1 altın = 50 gümüş = 200 bakır (ALTIN, GUMUS, BAKIR) */
 
     Esya envanter[ENVANTER_AZAMI]; /* envanter[0] her zaman yumruktur; eşyalar envanter[envanter_adet - 1]'e kadar */
     int envanter_adet;  /* dizideki eşya sayısı (yumruk dahil) */
@@ -91,7 +100,8 @@ void her_tur(Oyuncu *o);
      o->x, o->y'yi değiştirip 1 döndürürsen yeni yazdığın yere yürür (ör. yolu kısaltmak için).
        Yazdığın yer şu anki yerle aynıysa x, y'ye yürür; yerinde kalsın istiyorsan 0 döndür.
    Dönüşten sonra enerjisi 0 ya da altındaysa sırası biter. GM'in tokenları sürüklemesi bu fonksiyonu
-   çağırmaz. Yürüyüşü yerdeki bir eşyanın üstünde biten onu alır (envanterinde yer varsa). */
+   çağırmaz. Yürüyen, yolunun üstündeki eşyaları alır (envanterinde yer varsa); yürüyüşü bir portalda
+   biterse portalın haritasına geçer. */
 int hareket(Oyuncu *o, float x, float y);
 
 /* GM sırası gelen karakterin saldırısını onayladığında (ya da GM onu saldırttığında). esya, saldıranın

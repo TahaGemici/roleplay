@@ -1,4 +1,5 @@
-import { h, sinirla, sayiYaz } from './ortak.js';
+import { h, sinirla, sayiYaz, paraYaz } from './ortak.js';
+import { ses } from './ses.js';
 
 const AZAMI_ISIK = 20;
 
@@ -113,6 +114,7 @@ export function turKartiOlustur(kok, { gonder }) {
             ? h('button', { class: 'icon-btn', type: 'button', title: '1 enerji ekle', 'aria-label': '1 enerji ekle', onclick: () => gonder({ t: 'karakter_guncelle', id: k.id, enerji: k.statlar.enerji + 1 }), text: '+' })
             : null,
           h('span', { class: 'spacer' }),
+          k?.harita && !k.burada ? h('button', { class: 'btn btn-sm btn-ghost', type: 'button', title: `${k.ad} başka bir haritada`, onclick: () => gonder({ t: 'harita_ac', dosya: k.harita }), text: 'Haritasına git' }) : null,
           h('button', { class: 'btn btn-sm', type: 'button', onclick: () => gonder({ t: 'tur_bitir' }), text: 'Sıradakine geç' }),
           h('button', { class: 'btn btn-sm btn-ghost', type: 'button', onclick: () => gonder({ t: 'sira_durdur' }), text: 'Durdur' }),
         ),
@@ -148,6 +150,7 @@ export function turKartiOlustur(kok, { gonder }) {
       sonSiradaki = simdiki;
       ciz();
       if (yeniSira && benim) {
+        ses.sira();
         kok.classList.remove('is-fresh');
         void kok.offsetWidth;
         kok.classList.add('is-fresh');
@@ -164,6 +167,7 @@ const STATLAR = [
   ['zirh', 'Zırh'],
   ['buyu_direnci', 'Büyü direnci'],
   ['enerji', 'Enerji'],
+  ['kendi_agirligi', 'Kendi ağırlığı'],
 ];
 
 /** Oyuncunun kendi statları (başkalarınınkini yalnızca GM görür). */
@@ -181,7 +185,10 @@ export function durumKartiCiz(kok, durum) {
     h(
       'dl',
       { class: 'stats' },
-      ...[...STATLAR, ['agirlik', 'Ağırlık']].map(([k, ad]) => h('div', { class: `stat stat-${k}` }, h('dt', { text: ad }), h('dd', { text: sayiYaz(st[k]) }))),
+      ...[...STATLAR.filter(([k]) => k !== 'kendi_agirligi'), ['agirlik', 'Ağırlık']].map(([k, ad]) =>
+        h('div', { class: `stat stat-${k}`, title: k === 'agirlik' ? `Kendi ağırlığın ${sayiYaz(st.kendi_agirligi)}, eşyaların ${sayiYaz(st.agirlik - st.kendi_agirligi)}` : null }, h('dt', { text: ad }), h('dd', { text: sayiYaz(st[k]) })),
+      ),
+      h('div', { class: 'stat stat-para' }, h('dt', { text: 'Para' }), h('dd', { text: paraYaz(durum.ben.para) })),
     ),
   );
 }

@@ -479,6 +479,16 @@ input[type="checkbox"] {
 .viewport.is-pointer-focus:focus-visible {
   box-shadow: none;
 }
+/* Sisli haritada (oyuncu) haritanın dışı da sis kadar karanlıktır: oyuncu haritanın nerede bittiğini görmez */
+.viewport.is-fog {
+  background: rgb(9, 11, 10);
+}
+.viewport.is-fog .map-img {
+  box-shadow: none;
+}
+.app:not(.is-gm) .token:not(.is-memory) {
+  cursor: pointer;
+}
 .world {
   position: absolute;
   top: 0;
@@ -515,6 +525,7 @@ input[type="checkbox"] {
 .grid.is-light {
   --gc: #fffaf0;
 }
+.portals,
 .ground,
 .tokens,
 .labels,
@@ -557,6 +568,77 @@ input[type="checkbox"] {
   z-index: 5;
   cursor: grabbing;
   opacity: 0.85;
+}
+/* Hatıra: en son orada görülen eşya; biri almış olsa da oyuncu gidip bakana kadar durur */
+.ground-item.is-memory {
+  box-shadow: 0 0 0 calc(1.5px * var(--inv, 1)) rgba(185, 173, 150, 0.45);
+  filter: grayscale(0.6);
+  opacity: 0.85;
+}
+
+/* Portal: dönen mavi bir girdap; yerdeki eşyaların ve pulların altında */
+.portal {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--ps);
+  height: var(--ps);
+}
+.portal::before {
+  content: "";
+  position: absolute;
+  inset: 14%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(225, 245, 255, 0.95) 0, rgba(120, 195, 255, 0.55) 38%, rgba(60, 120, 220, 0) 72%);
+}
+.portal-swirl {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(#0d2a47, #5fb4ff, #0d2a47 28%, #a8e4ff 47%, #0d2a47 63%, #5fb4ff 82%, #0d2a47);
+  -webkit-mask: radial-gradient(circle, transparent 0 22%, #000 36%, #000 56%, transparent 71%);
+  mask: radial-gradient(circle, transparent 0 22%, #000 36%, #000 56%, transparent 71%);
+  animation: portal-donus 3.2s linear infinite;
+}
+.portal.is-movable {
+  pointer-events: auto;
+  cursor: grab;
+}
+.portal.is-dragging {
+  z-index: 5;
+  cursor: grabbing;
+  opacity: 0.85;
+}
+.portal.is-unlinked .portal-swirl,
+.portal.is-unlinked::before {
+  filter: grayscale(1) brightness(0.75);
+}
+.portal-name {
+  position: absolute;
+  top: 88%;
+  left: 50%;
+  max-width: calc(200px * var(--inv, 1));
+  overflow: hidden;
+  padding: calc(1px * var(--inv, 1)) calc(6px * var(--inv, 1));
+  border-radius: calc(4px * var(--inv, 1));
+  background: rgba(24, 16, 11, 0.82);
+  color: #bfe6ff;
+  font: 600 calc(12px * var(--inv, 1)) / 1.25 var(--sans);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.portal-name:empty {
+  display: none;
+}
+.portal.is-unlinked .portal-name {
+  color: var(--bone-faint);
+}
+@keyframes portal-donus {
+  to {
+    transform: rotate(1turn);
+  }
 }
 .fog {
   position: absolute;
@@ -923,6 +1005,11 @@ input[type="checkbox"] {
   border-color: #b8331f;
   border-width: 6px;
   box-shadow: 0 0 24px rgba(184, 51, 31, 0.7);
+}
+.ring-burst.is-portal {
+  border-color: #8fd3ff;
+  border-width: 4px;
+  box-shadow: 0 0 22px rgba(120, 200, 255, 0.8), inset 0 0 18px rgba(120, 200, 255, 0.6);
 }
 .floater {
   position: absolute;
@@ -2159,6 +2246,24 @@ input[type="checkbox"] {
 .row-meta.is-unplaced {
   color: var(--brass-hi);
 }
+.row-meta.is-elsewhere {
+  max-width: 45%;
+  overflow: hidden;
+  color: #9fd2f0;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* Karakter listesinde haritalara göre başlıklar */
+.list-group {
+  padding: 8px 8px 2px;
+  color: var(--bone-faint);
+  font: 700 11px/1.2 var(--sans);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.list-group:first-child {
+  padding-top: 0;
+}
 .char-row.is-unplaced .dot {
   box-shadow: 0 0 0 2px var(--brass-hi);
 }
@@ -2623,7 +2728,8 @@ dialog::backdrop {
   .pending-dot,
   .request,
   .attack-line.is-pending,
-  .path-line.is-pending {
+  .path-line.is-pending,
+  .portal-swirl {
     animation: none;
   }
   .token-body,
@@ -2774,4 +2880,204 @@ img.is-pixel {
 }
 .look-name {
   overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------------- para, yağma, takas, portal düğmesi, ses */
+
+.coins {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.coin {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--bone-dim);
+  font-size: 13px;
+}
+.coin .input {
+  height: 32px;
+  padding: 0 6px;
+  font-variant-numeric: tabular-nums;
+}
+/* Düzenleyicide (dar panel) birimin adı statlardaki gibi kutunun üstünde */
+.coins .coin {
+  display: grid;
+  gap: 3px;
+  font-size: 12px;
+}
+.coins .coin span {
+  order: -1;
+}
+.coin-icon {
+  flex: none;
+  color: var(--brass-hi);
+  font-size: 18px;
+  line-height: 1;
+}
+.stat-para dd {
+  color: var(--brass-hi);
+  font-size: 15px;
+}
+.btn-danger-text {
+  color: var(--ember-hi);
+}
+.btn-danger-text:hover {
+  color: var(--ember-hi);
+  background: rgba(201, 80, 59, 0.14);
+}
+
+.choice-row.is-three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.choice:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.choice.is-trade .choice-icon {
+  color: var(--brass-hi);
+}
+.choice.is-trade:hover,
+.choice.is-trade:focus-visible {
+  border-color: var(--brass-hi);
+}
+.choice.is-attack:disabled:hover,
+.choice.is-spell:disabled:hover {
+  border-color: var(--rule);
+}
+
+/* Ölünün üstü */
+.loot {
+  display: grid;
+  gap: 12px;
+}
+.loot-coins {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--wood-2);
+}
+.loot-coins > span:nth-child(2) {
+  flex: 1 1 auto;
+  font-weight: 600;
+}
+
+/* Takas: solda kendi teklifin, sağda karşı tarafın */
+.modal.trade {
+  width: min(96vw, 720px);
+}
+.trade-cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.trade-side {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--wood-2);
+}
+.trade-side.is-mine {
+  border-color: rgba(201, 162, 74, 0.55);
+}
+.trade-side .sub-title {
+  margin: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.trade-slots {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.trade-slot {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  min-height: 46px;
+  padding: 8px;
+  border: 1px dashed var(--rule);
+  border-radius: 8px;
+  background: var(--wood);
+}
+.trade-slot .input {
+  height: 34px;
+  background: var(--wood-2);
+}
+.trade-slot.is-empty {
+  place-items: center;
+  color: var(--bone-faint);
+}
+.trade-slot.is-coin {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+.trade-slot .item {
+  grid-template-columns: 40px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 0;
+  text-align: left;
+  cursor: default;
+}
+.trade-slot .item:hover {
+  border-color: var(--rule);
+}
+.trade-slot .item > .item-img,
+.trade-slot .item > .item-icon {
+  grid-row: span 2;
+}
+.trade-extra {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+  gap: 6px;
+}
+.trade-extra:empty {
+  display: none;
+}
+.trade-status {
+  margin: 0;
+  color: var(--bone-dim);
+  font-size: 14px;
+}
+
+.portal-chip {
+  justify-content: flex-start;
+  gap: 10px;
+  cursor: grab;
+}
+.portal-chip .portal-swirl {
+  position: relative;
+  inset: auto;
+  flex: none;
+  width: 22px;
+  height: 22px;
+}
+.sound-btn {
+  min-width: 38px;
+  padding: 0 8px;
+}
+.sound-btn[aria-pressed="false"] {
+  opacity: 0.6;
+}
+
+@media (max-width: 560px) {
+  .trade-cols,
+  .choice-row.is-three {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
