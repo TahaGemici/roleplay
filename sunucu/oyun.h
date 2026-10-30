@@ -43,6 +43,7 @@ typedef struct Istemci {
     double kova; /* hız sınırı */
     long long kova_ms;
     long long kesif_harita, kesif_surum, duvar_surum; /* hangi haritanın keşfi ve duvarları gönderildi */
+    int gecikme; /* bağlantının gidiş-dönüş süresi (ms, yumuşatılmış); -1: henüz ölçülmedi */
     struct Istemci *sonraki;
 } Istemci;
 
@@ -65,12 +66,19 @@ void istemci_cikar(Istemci *c);
 void istemci_mesaj(Istemci *c, const char *metin, size_t n);
 /* Kuyruğa ekler; kendi kilidini kullanır, oyun_kilit gerekmez. */
 void istemciye_gonder(Istemci *c, int tur, const char *veri, size_t n);
-/* Yazıcı iş parçacığı: kuyruğu soketle boşaltır, boşta kalınca ping gönderir. */
+/* Yazıcı iş parçacığı: kuyruğu soketle boşaltır; birkaç saniyede bir, yükü gönderildiği an (ms) olan bir ping atar. */
 void *istemci_yazici(void *arg);
+/* Tarayıcı pinge yanıt verdi (yük: pingin gönderildiği an); bağlantının gecikmesi güncellenir. */
+void istemci_pong(Istemci *c, const char *yuk, size_t n);
+/* Saniyede bir çağrılır (kilit tutulmadan): birkaç saniyede bir herkesin bağlantı gecikmesi herkese duyurulur. */
+void oyun_tik(void);
 
 /* Eşya dosyasının oyun klasörüne göre yolu ("esyalar/sınıf/ad.png") en fazla bu kadar bayt olabilir:
    oyuncunun envanterinde Esya.resim[256] içinde tutulur. Resmin kendisi her boyutta olabilir. */
 #define ESYA_YOLU_AZAMI 255
+
+/* Bir oyuncunun kendi pulu için yükleyebileceği en fazla resim (tokenlar/oyuncular/<kimlik>/ altında) */
+#define AZAMI_OYUNCU_RESMI 40
 
 /* Dosya erişimi ve dosya yöneticisi */
 int oyuncu_dosya_izni(const char *oyuncu, const char *goreli);

@@ -91,8 +91,9 @@ export async function duzenle({ baslik, metin }) {
 }
 
 /**
- * Birkaç alanlı form. alanlar: [{ ad, etiket, tur: 'metin' | 'secim' | 'sayi', deger, secenekler: [{ deger, metin }],
- * oneriler: [...], en, ust }]. Onaylanırsa { ad: değer } döner, vazgeçilirse null.
+ * Birkaç alanlı form. alanlar: [{ ad, etiket, tur: 'metin' | 'secim' | 'sayi' | 'dosya', deger, secenekler:
+ * [{ deger, metin }], oneriler: [...], en, ust, kabul, ipucu }]. Onaylanırsa { ad: değer } döner (dosya alanında seçilen
+ * dosyaların dizisi), vazgeçilirse null.
  */
 export async function formAc({ baslik, metin, alanlar, dugme = 'Tamam', tehlikeli = false }) {
   const girdiler = {};
@@ -103,6 +104,8 @@ export async function formAc({ baslik, metin, alanlar, dugme = 'Tamam', tehlikel
     if (a.tur === 'secim') {
       girdi = h('select', { class: 'input' }, ...a.secenekler.map((s) => h('option', { value: s.deger, text: s.metin })));
       if (a.deger !== undefined) girdi.value = a.deger;
+    } else if (a.tur === 'dosya') {
+      girdi = h('input', { class: 'input input-file', type: 'file', accept: a.kabul || null, multiple: a.coklu || null });
     } else if (a.tur === 'sayi') {
       girdi = h('input', { class: 'input', type: 'number', min: a.en, max: a.ust, step: 'any', inputmode: 'decimal', value: a.deger ?? '' });
     } else {
@@ -111,7 +114,7 @@ export async function formAc({ baslik, metin, alanlar, dugme = 'Tamam', tehlikel
       if (listeId) icerik.push(h('datalist', { id: listeId }, ...a.oneriler.map((o) => h('option', { value: o }))));
     }
     girdiler[a.ad] = girdi;
-    icerik.push(h('label', { class: 'field' }, h('span', { class: 'field-label', text: a.etiket }), girdi));
+    icerik.push(h('label', { class: 'field' }, h('span', { class: 'field-label', text: a.etiket }), girdi, a.ipucu ? h('span', { class: 'hint', text: a.ipucu }) : null));
   }
   const ilk = Object.values(girdiler)[0];
   const sonuc = await ac({
@@ -124,7 +127,7 @@ export async function formAc({ baslik, metin, alanlar, dugme = 'Tamam', tehlikel
     odak: ilk,
   });
   if (sonuc !== 'tamam') return null;
-  return Object.fromEntries(Object.entries(girdiler).map(([k, g]) => [k, g.value]));
+  return Object.fromEntries(Object.entries(girdiler).map(([k, g]) => [k, g.type === 'file' ? [...g.files] : g.value]));
 }
 
 /** İçinde düğmeler olan seçim penceresi: secim(deger) çağrılınca kapanır ve o değeri döner. */

@@ -1,4 +1,4 @@
-import { h, sinirla, sayiYaz, paraYaz } from './ortak.js';
+import { h, sinirla, sayiYaz, SIKKELER } from './ortak.js';
 import { ses } from './ses.js';
 
 const AZAMI_ISIK = 20;
@@ -160,7 +160,8 @@ export function turKartiOlustur(kok, { gonder, yolUzunlugu }) {
   };
 }
 
-/* GM'in düzenleyebildiği statlar. Ağırlık (70 + eşyalar) sunucudan gelir; yalnızca gösterilir. */
+/* GM'in düzenleyebildiği statlar (her birinin azamisi de var). Ağırlık (70 + eşyalar) sunucudan gelir; yalnızca
+   gösterilir, azamisi yoktur. */
 const STATLAR = [
   ['can', 'Can'],
   ['odak', 'Odak'],
@@ -169,9 +170,17 @@ const STATLAR = [
   ['enerji', 'Enerji'],
 ];
 
-/** Oyuncunun kendi statları (başkalarınınkini yalnızca GM görür). */
+/* "22/35": azamisi olan stat (azami 0: azamisi yok, yalnızca değer) */
+export const statYaz = (statlar, k) => {
+  const az = statlar?.azami?.[k];
+  return az > 0 ? `${sayiYaz(statlar[k])}/${sayiYaz(az)}` : sayiYaz(statlar?.[k]);
+};
+
+/** Oyuncunun kendi statları (başkalarınınkini yalnızca GM görür): azamisi olanlar "22/35" diye; para, statlar gibi
+ *  altın, gümüş ve bakır ayrı ayrı. */
 export function durumKartiCiz(kok, durum) {
   const st = durum.statlar;
+  const para = durum.ben.para || {};
   kok.classList.toggle('is-dead', Boolean(durum.olu));
   kok.replaceChildren(
     h(
@@ -184,8 +193,9 @@ export function durumKartiCiz(kok, durum) {
     h(
       'dl',
       { class: 'stats' },
-      ...[...STATLAR, ['agirlik', 'Ağırlık']].map(([k, ad]) => h('div', { class: `stat stat-${k}` }, h('dt', { text: ad }), h('dd', { text: sayiYaz(st[k]) }))),
-      h('div', { class: 'stat stat-para' }, h('dt', { text: 'Para' }), h('dd', { text: paraYaz(durum.ben.para) })),
+      ...STATLAR.map(([k, ad]) => h('div', { class: `stat stat-${k}` }, h('dt', { text: ad }), h('dd', { text: statYaz(st, k) }))),
+      h('div', { class: 'stat stat-agirlik' }, h('dt', { text: 'Ağırlık' }), h('dd', { text: sayiYaz(st.agirlik) })),
+      ...SIKKELER.map(([k, ad]) => h('div', { class: `stat stat-para stat-${k}` }, h('dt', { text: ad.charAt(0).toLocaleUpperCase('tr') + ad.slice(1) }), h('dd', { text: String(para[k] ?? 0) }))),
     ),
   );
 }

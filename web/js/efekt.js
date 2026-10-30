@@ -1,5 +1,6 @@
 import { h, azHareket } from './ortak.js';
 import { ses } from './ses.js';
+import { varsayilanEsyaResmi } from './envanter.js';
 
 /*
  * Saldırı ve ölüm animasyonları. Haritanın verdiği bağlamla çalışır:
@@ -149,7 +150,8 @@ export function saldiriOynat(ctx, m) {
   } else if (A && H && !az) {
     const mesafe = Math.hypot(H.x - A.x, H.y - A.y) / s;
     const aci = (Math.atan2(H.y - A.y, H.x - A.x) * 180) / Math.PI;
-    const el = mermi(ctx, m.resim, s);
+    /* Eşyanın resmi yoksa sınıfının varsayılan resmi; yumrukta (sınıf gelmez) kıvılcım */
+    const el = mermi(ctx, m.resim || (m.sinif !== undefined ? varsayilanEsyaResmi(m.sinif) : null), s);
     const yari = s * 0.31;
     let anim;
     if (mesafe <= 1.6) {
@@ -243,7 +245,9 @@ export function saldiriOynat(ctx, m) {
   }
 }
 
-/** Ölüm: token sarsılır, yana devrilir, solar; bittiğinde bitti() çağrılır (token ölü haline geçer). */
+/** Ölüm: token sarsılır, yana devrilir, solar; bittiğinde bitti() çağrılır (token ölü haline geçer). Animasyon
+ *  bitince yerini ölü pulun CSS'i alır; o sırada gövdenin CSS geçişleri kapalı tutulur, yoksa tarayıcı devrilmeyi
+ *  bir kez daha (dik halinden) oynatabiliyor. */
 export function olumOynat(ctx, id, bitti) {
   const g = ctx.govde(id);
   const P = ctx.merkez(id);
@@ -257,6 +261,7 @@ export function olumOynat(ctx, id, bitti) {
     halka(ctx, P.x, P.y, s * 1.3, 'is-death');
     kivilcimlar(ctx, P.x, P.y, s * 1.1, '#8a1f14');
   }
+  g.classList.add('no-transition');
   const anim = g.animate(
     [
       { transform: 'none', filter: 'none', opacity: 1 },
@@ -270,11 +275,70 @@ export function olumOynat(ctx, id, bitti) {
   const son = () => {
     if (bitti1) return;
     bitti1 = true;
-    bitti();
+    bitti(); /* ölü pulun sınıfı eklenir: aynı duruşu CSS tutar */
     anim.cancel();
+    void g.offsetWidth; /* yeni duruş geçişsiz uygulansın */
+    requestAnimationFrame(() => requestAnimationFrame(() => g.classList.remove('no-transition')));
   };
   anim.onfinish = son;
   setTimeout(son, 1600); /* sekme arka plandaysa animasyon beklemeye kalabilir */
+}
+
+const TEPKI_SIMGESI = { alkis: '👏', kahkaha: '😂', aglama: '😢', bagir: '📢' };
+
+/**
+ * Tepki: karakterin üstünde yükselip sönen bir simge. Görülmeyen (yalnızca duyulan) bağırmada, sesin geldiği yerde
+ * dalgalanan halkalar ve adı (biliniyorsa). P: dünya pikseli (pulun merkezi), olcek: pulun boyu.
+ */
+export function tepkiOynat(ctx, P, tur, { gordu = true, ad = null, olcek = 1 } = {}) {
+  if (!P) return;
+  const s = ctx.boyut() * olcek;
+  const simge = TEPKI_SIMGESI[tur] || '❔';
+  if (!gordu) {
+    const el = h('div', { class: 'shout-far' }, h('span', { class: 'shout-ring' }), h('span', { class: 'shout-ring' }), h('span', { class: 'shout-icon', text: simge }), h('span', { class: 'shout-name', text: ad ? `${ad} bağırıyor` : 'Biri bağırıyor' }));
+    yerlestir(el, P.x, P.y);
+    ctx.katman.append(el);
+    setTimeout(() => el.remove(), 2600);
+    return;
+  }
+  const el = h('div', { class: `reaction-pop is-${tur}`, text: simge });
+  el.style.setProperty('--rs', `${Math.round(Math.max(26, ctx.boyut() * 0.55))}px`);
+  ctx.katman.append(el);
+  const y0 = P.y - s * 0.55;
+  if (azHareket()) {
+    yerlestir(el, P.x, y0 - s * 0.3);
+    setTimeout(() => el.remove(), 1800);
+    return;
+  }
+  const sars = tur === 'bagir' ? [-8, 8, -6, 6, 0] : tur === 'kahkaha' ? [-6, 6, -6, 6, 0] : [0, 0, 0, 0, 0];
+  const anim = el.animate(
+    [
+      { transform: `translate(${P.x}px, ${y0}px) scale(.3)`, opacity: 0 },
+      { transform: `translate(${P.x}px, ${y0 - s * 0.25}px) scale(1.15) rotate(${sars[0]}deg)`, opacity: 1, offset: 0.15 },
+      { transform: `translate(${P.x}px, ${y0 - s * 0.32}px) scale(1) rotate(${sars[1]}deg)`, opacity: 1, offset: 0.3 },
+      { transform: `translate(${P.x}px, ${y0 - s * 0.38}px) scale(1) rotate(${sars[2]}deg)`, opacity: 1, offset: 0.45 },
+      { transform: `translate(${P.x}px, ${y0 - s * 0.44}px) scale(1) rotate(${sars[3]}deg)`, opacity: 1, offset: 0.6 },
+      { transform: `translate(${P.x}px, ${y0 - s * 0.7}px) scale(.9) rotate(${sars[4]}deg)`, opacity: 0 },
+    ],
+    { duration: 1900, easing: 'ease-out', fill: 'forwards' },
+  );
+  kaldir(el, anim);
+  if (tur === 'bagir') halka(ctx, P.x, P.y, s * 1.6, 'is-shout');
+  if (tur === 'aglama') {
+    for (const [dx, gecikme] of [[-0.18, 120], [0.18, 380]]) {
+      const d = h('div', { class: 'tear' });
+      ctx.katman.append(d);
+      const a = d.animate(
+        [
+          { transform: `translate(${P.x + dx * s}px, ${P.y - s * 0.05}px) scale(.6)`, opacity: 0 },
+          { transform: `translate(${P.x + dx * s}px, ${P.y + s * 0.05}px) scale(1)`, opacity: 1, offset: 0.25 },
+          { transform: `translate(${P.x + dx * s}px, ${P.y + s * 0.4}px) scale(.8)`, opacity: 0 },
+        ],
+        { duration: 900, delay: gecikme, easing: 'ease-in', fill: 'both' },
+      );
+      kaldir(d, a);
+    }
+  }
 }
 
 /** Portal: geçilen ya da varılan yerde dönen bir halka ve parıltılar. P: dünya pikseli. */

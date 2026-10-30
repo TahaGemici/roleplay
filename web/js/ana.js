@@ -1,8 +1,8 @@
-import { $, h, istek, bildir, dosyaAdi, paraYaz, paraVar } from './ortak.js';
+import { $, h, istek, bildir, dosyaAdi, paraYaz, paraVar, TEPKILER } from './ortak.js';
 import { haritaOlustur } from './harita.js';
 import { kayitOlustur } from './kayit.js';
 import { turKartiOlustur, durumKartiCiz } from './tur.js';
-import { envanterCiz, esyaKarti, grupla } from './envanter.js';
+import { envanterCiz, esyaKarti, grupla, esyaSayisi } from './envanter.js';
 import { secimPenceresi, goster } from './pencere.js';
 import { zarSimgesi } from './zar-sekilleri.js';
 import { gorunumPenceresi } from './gorunum.js';
@@ -26,6 +26,7 @@ let sonIstek = null;
 let gorunumAcik = null; // açık görünüm penceresi (yeni durumda yenilenir)
 let ganimetAcik = null; // açık ganimet penceresi: { hedef, kap }
 let ganimetSessiz = null; // "Hepsini al" ile kapanan pencere sunucunun yanıtıyla yeniden açılmasın
+let gecikmeler = { oyuncular: {}, gm: null }; // bağlantı gecikmeleri (ms), sunucu birkaç saniyede bir gönderir
 let harita, kayit, tur, gm, dosyalar, takas;
 
 function gonder(mesaj) {
@@ -310,6 +311,7 @@ function kur() {
     yerKatmani: $('#yerdekiler'),
     tokenKatmani: $('#tokenler'),
     sisTuvali: $('#sis'),
+    sisBulanik: $('#sis-bulanik'),
     katman: $('#katman'),
     etiketler: $('#etiketler'),
     efektKatmani: $('#efektler'),
@@ -320,13 +322,16 @@ function kur() {
   harita.on('yolYok', () => bildir('Oraya gidecek bir yol yok.'));
   harita.on('duvarEkle', (x1, y1, x2, y2) => gonder({ t: 'duvar_ekle', x1, y1, x2, y2 }));
   harita.on('duvarSil', (id) => gonder({ t: 'duvar_sil', id }));
-  harita.on('tasi', (id, x, y) => gonder({ t: 'tasi', id, x, y }));
+  harita.on('tasi', (id, x, y, serbest) => gonder({ t: 'tasi', id, x, y, ...(serbest ? { serbest: true } : {}) }));
   harita.on('isaret', (x, y, odak) => gonder({ t: 'isaret', x, y, odak }));
   harita.on('sec', (id) => gm?.secimDegisti(id));
   harita.on('etkiles', (id) => etkilesimSec(id));
   harita.on('istekTasi', () => gm?.istekTasindi());
   harita.on('esyaTasi', (id, x, y) => gonder({ t: 'esya_birak', kaynak: 'yer', id, x, y }));
+  harita.on('esyalariTasi', (ogeler) => gonder({ t: 'yer_esya_tasi', ogeler }));
   harita.on('esyaTikla', (id) => gm?.yerEsyasiTiklandi(id));
+  harita.on('esyaSecim', (ids) => gm?.yerSecimDegisti(ids));
+  harita.on('karakterTikla', (id) => gm?.karakterTiklandi(id));
   harita.on('portalTasi', (id, x, y) => gonder({ t: 'portal_guncelle', id, x, y }));
   harita.on('portalTikla', (id) => gm?.portalTiklandi(id));
 
@@ -365,6 +370,15 @@ function kur() {
     if (!ifade) return $('#zar-ifade').focus();
     gonder({ t: 'zar', ifade });
     $('#zar-ifade').select();
+  });
+
+  // Tepkiler (oyuncu): haritadayken herkes görür; bağırmayı görüş menzilindeki herkes duvarlardan bağımsız duyar
+  $('#tepkiler').replaceChildren(
+    ...TEPKILER.map(([tur, simge, ad]) => h('button', { class: 'reaction-btn', type: 'button', title: ad, 'aria-label': ad, dataset: { tepki: tur }, text: simge })),
+  );
+  $('#tepkiler').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-tepki]');
+    if (b) gonder({ t: 'tepki', tur: b.dataset.tepki });
   });
 
   // Oyuncunun kendi görünümü ve envanterinden yere bırakma
@@ -471,10 +485,34 @@ function bosDurum() {
   }
 }
 
+/* Bağlantı kalitesi: gecikmeye göre üç çubuk ve süre (ölçülmediyse gri) */
+function baglantiKalitesi(ms) {
+  const bilinmiyor = typeof ms !== 'number';
+  const seviye = bilinmiyor ? 0 : ms < 120 ? 3 : ms < 300 ? 2 : 1;
+  const sinif = bilinmiyor ? 'is-unknown' : ['', 'is-bad', 'is-ok', 'is-good'][seviye];
+  return h(
+    'span',
+    { class: `net ${sinif}`, 'aria-hidden': 'true' },
+    h('span', { class: 'net-bars' }, ...[1, 2, 3].map((i) => h('span', { class: `net-bar${i <= seviye ? ' is-on' : ''}` }))),
+    h('span', { class: 'net-ms', text: bilinmiyor ? '…' : `${ms} ms` }),
+  );
+}
+
+const kaliteAdi = (ms) => (typeof ms !== 'number' ? 'ölçülüyor' : ms < 120 ? 'iyi' : ms < 300 ? 'orta' : 'zayıf');
+
+/* Sağ üstte oyundakiler (GM dahil): adının yanında bağlantısının kalitesi */
 function kimlerCiz() {
   const cevrimici = durum.oyuncular.filter((o) => o.cevrimici);
+  const cip = (ad, renk, ms, ben) =>
+    h(
+      'li',
+      { class: `who-chip${ben ? ' is-me' : ''}`, vars: { '--c': renk }, title: `${ad} · bağlantı ${kaliteAdi(ms)}${typeof ms === 'number' ? ` (${ms} ms gecikme)` : ''}` },
+      h('span', { class: 'who-name', text: ad }),
+      baglantiKalitesi(ms),
+    );
   $('#kimler').replaceChildren(
-    ...cevrimici.map((o) => h('li', { class: `who-chip${o.id === durum.ben.id ? ' is-me' : ''}`, vars: { '--c': o.renk }, title: o.ad }, o.ad)),
+    ...(durum.gm_cevrimici ? [cip('GM', durum.gm_renk || '#c9a24a', gecikmeler.gm ?? undefined, durum.ben.gm)] : []),
+    ...cevrimici.map((o) => cip(o.ad, o.renk, gecikmeler.oyuncular[o.id], o.id === durum.ben.id)),
   );
 }
 
@@ -535,7 +573,11 @@ function mesaj(m) {
             gonder({ t: 'esya_imha', sira, ad: e.ad });
           },
         });
-        $('#envanter-sayi').textContent = `(${m.envanter.length}/${m.envanter_azami})`;
+        $('#envanter-sayi').textContent = `(${esyaSayisi(m.envanter)}/${m.envanter_azami})`;
+        /* Tepki düğmeleri: haritada ve hayattayken */
+        const tepki = $('#tepkiler');
+        tepki.hidden = !(m.ben.yerde && m.harita && !m.harita.gizli);
+        for (const b of tepki.children) b.disabled = Boolean(m.olu);
       }
       gm?.ayarla(m);
       takas.ayarla(m);
@@ -555,6 +597,16 @@ function mesaj(m) {
       break;
     case 'isaret':
       harita.isaretGoster(m);
+      break;
+    case 'tepki':
+      harita.tepkiOlayi(m);
+      break;
+    case 'gecikme':
+      gecikmeler = { oyuncular: m.oyuncular || {}, gm: m.gm };
+      if (durum) kimlerCiz();
+      break;
+    case 'yer_kopyalandi':
+      gm?.yerKopyalandi(m.ids || []);
       break;
     case 'yuru':
       harita.yuruOlayi(m);

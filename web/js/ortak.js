@@ -161,13 +161,14 @@ export async function istek(yol, { yontem = 'GET', govde } = {}) {
   return veri;
 }
 
-// Dosyayı XHR ile yükler (ilerleme gösterebilmek için)
-export function dosyaYukle(klasor, dosya, { uzerine = false, ilerleme } = {}) {
+/* Dosyayı XHR ile yükler (ilerleme gösterebilmek için). GM oyun klasörüne yükler; oyuncu (oyuncu: true) yalnızca
+   kendi pulunun resimlerini (klasor yok sayılır). ad verilirse dosya o adla kaydedilir. */
+export function dosyaYukle(klasor, dosya, { uzerine = false, ilerleme, oyuncu = false, ad } = {}) {
   return new Promise((coz, reddet) => {
     const xhr = new XMLHttpRequest();
-    const sorgu = new URLSearchParams({ yol: klasor, ad: dosya.name });
+    const sorgu = new URLSearchParams(oyuncu ? { ad: ad || dosya.name } : { yol: klasor, ad: ad || dosya.name });
     if (uzerine) sorgu.set('uzerine', '1');
-    xhr.open('POST', `/api/yukle?${sorgu}`);
+    xhr.open('POST', `${oyuncu ? '/api/oyuncu-yukle' : '/api/yukle'}?${sorgu}`);
     xhr.setRequestHeader('Content-Type', 'application/octet-stream');
     if (ilerleme) {
       xhr.upload.onprogress = (e) => {
@@ -229,3 +230,11 @@ export const paraVar = (p) => SIKKELER.some(([k]) => p?.[k] > 0);
 
 /* Girdideki sayı: 0 ya da artı tam sayı */
 export const sikkeSayisi = (v) => Math.max(0, Math.floor(Number(v) || 0));
+
+/* Tepkiler: [tür, simge, ad]. Bağırmayı görüş menzilindeki herkes duvarlardan bağımsız duyar. */
+export const TEPKILER = [
+  ['alkis', '👏', 'Alkışla'],
+  ['kahkaha', '😂', 'Kahkaha at'],
+  ['aglama', '😢', 'Ağla'],
+  ['bagir', '📢', 'Bağır (duvarların arkasından da duyulur)'],
+];

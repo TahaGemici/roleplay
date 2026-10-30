@@ -16,7 +16,8 @@
 #ifndef KURALLAR_H
 #define KURALLAR_H
 
-/* Bir envanterde en fazla bu kadar eşya olabilir (yumruk dahil). İstersen değiştir ve yeniden derle. */
+/* Bir envanterde yumruğun yanında en fazla bu kadar eşya olabilir (yumruk yer kaplamaz). İstersen değiştir ve
+   yeniden derle. */
 #define ENVANTER_AZAMI 12
 
 /* Eşyasız bir karakterin ağırlığı: o->agirlik = KARAKTER_AGIRLIGI + eşyalarının ağırlıkları */
@@ -38,27 +39,40 @@ typedef struct {
 
 /* ------------------------------------------------------------------ oyuncu */
 
-/* Oyuncuların ve GM'in yerleştirdiği NPC'lerin hepsi bu yapıyı kullanır. */
+/* Statların azami değerleri. GM her karakter için karakter düzenleyicisinden belirler; sen de değiştirebilirsin.
+   0 ya da altıysa o statın azamisi yoktur. Sunucu bir statı azamisinin üstünde bırakmaz: kurallardan ve GM'in
+   düzenlemesinden sonra azamiye indirir (can 40, azami can 35 ise can 35 olur). Ağırlığın azamisi yoktur. */
+typedef struct {
+    float can, odak, zirh, buyu_direnci, enerji;
+} Azami;
+
+/* Oyuncuların ve GM'in NPC'lerinin hepsi bu yapıyı kullanır. */
 typedef struct {
     const char *ad;     /* adı (değiştirme) */
 
     float x, y;         /* konumu, kare biriminde: (0,0) haritanın sol üst köşesi, (0.5, 0.5) ilk karenin
-                           ortası. Değiştirirsen karakter oraya düz çizgide itilir: harita sınırları içinde kalır,
-                           arada duvar varsa duvarın önünde durur (hareket() için oradaki açıklamaya bak). */
+                           ortası. GM Ayarlar'da "Konumlar tam sayı" seçeneğini açtıysa konum karenin numarasıdır:
+                           (0,0) sol üstteki kare, (3,5) soldan dördüncü, yukarıdan altıncı kare; x ve y hep tam sayıdır
+                           (karakter karenin ortasında durur). Değiştirirsen karakter oraya düz çizgide itilir: harita
+                           sınırları içinde kalır, arada duvar varsa duvarın önünde durur (hareket() için oradaki
+                           açıklamaya bak). */
     float can;          /* 0 ya da altına inerse ölür: saldırı ve büyüde hemen, başka zaman sırası bitince */
     float odak;
     float zirh;
     float buyu_direnci;
-    float enerji;       /* aksiyon puanı. Ne kadar harcanacağını hareket(), saldiri() ve buyu() içinde sen
-                           belirlersin; 0 ya da altına inince sıra geçer. */
+    float enerji;       /* aksiyon puanı. Sunucu ona hiç dokunmaz: sıra başında ne olacağını her_tur(), ne kadar
+                           harcanacağını hareket(), saldiri() ve buyu() içinde sen belirlersin; sıra başında ya da
+                           bir işten sonra 0 ya da altındaysa sıra geçer. */
+    Azami azami;        /* statların azami değerleri: o->azami.can, o->azami.enerji... (0: azamisi yok) */
     float agirlik;      /* ağırlığı: KARAKTER_AGIRLIGI (70) + eşyalarının ağırlıkları. Sunucu hesaplar (salt okunur);
                            arttıkça haritadaki pulu büyür (70'te 1 kat, 140'ta 2 kat). */
     int altin;          /* parası: altın, gümüş ve bakır ayrı ayrı sayılır, birbirine çevrilmez. 0'dan aşağı inmez. */
     int gumus;
     int bakir;
 
-    Esya envanter[ENVANTER_AZAMI]; /* envanter[0] her zaman yumruktur; eşyalar envanter[envanter_adet - 1]'e kadar */
-    int envanter_adet;  /* dizideki eşya sayısı (yumruk dahil) */
+    Esya envanter[ENVANTER_AZAMI + 1]; /* envanter[0] her zaman yumruktur; eşyalar envanter[1]'den
+                                          envanter[envanter_adet - 1]'e kadar */
+    int envanter_adet;  /* dizideki eşya sayısı (yumruk dahil; en fazla ENVANTER_AZAMI + 1) */
 
     int npc;            /* 1: GM'in yönettiği karakter (NPC), 0: oyuncu. Salt okunur. */
 } Oyuncu;
@@ -79,7 +93,8 @@ extern int tur_sayisi; /* kaçıncı tur (1, 2, 3...) */
 extern float yol_uzunlugu;
 
 /* hareket() içinde: yolun başından uzunluk kadar ilerideki noktayı *x, *y'ye yazar (yolun sonunu geçerse hedefi).
-   Yolun bir kısmını yürütmek için: yol_noktasi(o->enerji, &o->x, &o->y); return 1; */
+   Konumlar tam sayıysa o noktanın bulunduğu karenin numarasını yazar. Yolun bir kısmını yürütmek için:
+   yol_noktasi(o->enerji, &o->x, &o->y); return 1; */
 void yol_noktasi(float uzunluk, float *x, float *y);
 
 /* ------------------------------------------------------------------ kurallar.c'de senin yazdıkların */
@@ -94,12 +109,14 @@ extern const Esya yumruk;
 /* Büyüler; liste NULL ile biter. Oyuncu bir karaktere tıklayıp "Büyü yap"ı seçince bu listeden seçer. */
 extern const char *const buyuler[];
 
-/* Sıra o karaktere geldiğinde. Çağrılmadan hemen önce o->enerji, GM'in Ayarlar'da verdiği
-   "sıra başı enerji" değerine doldurulur; istersen değiştir. 0 yaparsan sırası hemen geçer. */
+/* Sıra o karaktere geldiğinde (oyuncular da NPC'ler de). Sunucu enerjiye dokunmaz: sıra başında enerjinin ne
+   olacağını burada sen belirlersin (ör. o->enerji = o->azami.enerji; ya da o->enerji += 3;). Dönüşte enerjisi 0 ya
+   da altındaysa sırası hemen geçer. */
 void her_tur(Oyuncu *o);
 
 /* Sırası gelen oyuncu haritada bir yere tıkladı ve GM bu yürüyüşü onayladı (GM hedefi kaydırdıysa x, y
-   kaydırılmış haldir). Çağrıldığında o->x, o->y oyuncunun şu anki yeri, x, y gitmek istediği yerdir. Arada duvar
+   kaydırılmış haldir); ya da sırası gelen NPC'yi GM haritada sürükledi. Çağrıldığında o->x, o->y karakterin şu anki
+   yeri, x, y gitmek istediği yerdir (konumlar tam sayıysa ikisi de karenin numarasıdır). Arada duvar
    varsa karakter duvarın etrafından dolaşır: yürüyeceği yolun uzunluğu yol_uzunlugu'dur (düz çizgiden uzun olabilir).
    Enerjiyi sen düşürürsün; sunucu yürüyüş için kendiliğinden enerji harcamaz.
      1 döndürürsen oyuncu x, y'ye yürür.
@@ -110,8 +127,8 @@ void her_tur(Oyuncu *o);
        etrafından gider; yol yoksa yerinde kalır ve hareket() hiç çağrılmamış gibi olur.
        Yazdığın yer şu anki yerle aynıysa x, y'ye yürür; yerinde kalsın istiyorsan 0 döndür.
    Dönüşten sonra enerjisi 0 ya da altındaysa sırası biter. GM'in tokenları sürüklemesi bu fonksiyonu
-   çağırmaz. Yürüyen, yolunun üstündeki eşyaları alır (envanterinde yer varsa); yürüyüşü bir portalda
-   biterse portalın haritasına geçer. */
+   çağırmaz (sırası gelen NPC'yi sürüklemesi dışında). Yürüyen, yolunun üstündeki eşyaları alır (envanterinde yer
+   varsa); yürüyüşü bir portalda biterse portalın haritasına geçer. */
 int hareket(Oyuncu *o, float x, float y);
 
 /* GM sırası gelen karakterin saldırısını onayladığında (ya da GM onu saldırttığında). esya, saldıranın
@@ -145,8 +162,8 @@ void gm_bildir(const char *bicim, ...) __attribute__((format(printf, 1, 2)));
 /* Yalnızca o oyuncunun (ve GM'in) kaydına yazar: bildir(o, "Uzaktan bir ses duydun."); */
 void bildir(const Oyuncu *o, const char *bicim, ...) __attribute__((format(printf, 2, 3)));
 
-/* Envantere yeni bir eşya ekler (ağırlığı 1) ve onu döner; envanter doluysa NULL döner.
-   resim NULL ya da "" olabilir. */
+/* Envantere yeni bir eşya ekler (ağırlığı 1) ve onu döner; envanter doluysa (yumruğun yanında ENVANTER_AZAMI eşya
+   varsa) NULL döner. resim NULL ya da "" olabilir: resmi olmayan eşya sınıfına göre varsayılan bir resimle görünür. */
 Esya *envanter_ekle(Oyuncu *o, const char *ad, const char *sinif, const char *resim);
 
 /* envanter[sira]'yı çıkarır; sonrakiler bir öne kayar. Yumruk (envanter[0]) çıkarılamaz. */

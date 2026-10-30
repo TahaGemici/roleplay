@@ -15,11 +15,14 @@
  *   o->ad                       adı
  *   o->x, o->y                  konumu, kare biriminde (değiştirirsen taşınır)
  *   o->can, o->odak, o->zirh, o->buyu_direnci
- *   o->enerji                   aksiyon puanı; 0 olunca sıra geçer (ne kadar harcanacağını sen yazarsın)
+ *   o->enerji                   aksiyon puanı; 0 olunca sıra geçer (sıra başında ne olacağını her_tur'da,
+ *                               ne kadar harcanacağını öbür fonksiyonlarda sen yazarsın; sunucu dokunmaz)
+ *   o->azami.can, o->azami.enerji, ...  statların azami değerleri (GM belirler; 0: azamisi yok).
+ *                               Sunucu bir statı azamisinin üstünde bırakmaz.
  *   o->agirlik                  ağırlığı: KARAKTER_AGIRLIGI (70) + eşyalarının ağırlıkları (salt okunur)
  *   o->altin, o->gumus, o->bakir parası: üç ayrı sikke, birbirine çevrilmez
  *   o->envanter[i]              eşyalar: .ad, .sinif, .resim, .agirlik, .dayaniklilik  (i < o->envanter_adet;
- *                               envanter[0] her zaman yumruk, en fazla ENVANTER_AZAMI eşya)
+ *                               envanter[0] her zaman yumruk, yanında en fazla ENVANTER_AZAMI eşya)
  *   o->npc                      1 ise GM'in karakteri
  *
  *   harita.genislik, harita.yukseklik   açık haritanın boyutu (kare; GM haritayı açarken seçer)
@@ -73,10 +76,15 @@ const char *const buyuler[] = {
     NULL
 };
 
-/* ------------------------------------------------------------------ her sıranın başında */
-
+/* ------------------------------------------------------------------ her sıranın başında
+ *
+ * Sunucu enerjiye dokunmaz; sıra başında ne olacağını burada sen belirlersin. Şimdilik enerji azamisine dolar
+ * (GM azamiyi karakter düzenleyicisinden verir; azami yoksa 10). Örnek: o->enerji += 3; birikerek artar.
+ * Dönüşte enerjisi 0 ya da altındaysa sırası hemen geçer.
+ */
 void her_tur(Oyuncu *o)
 {
+    o->enerji = o->azami.enerji > 0 ? o->azami.enerji : 10;
 }
 
 /* ------------------------------------------------------------------ GM bir yürüyüşü onaylayınca

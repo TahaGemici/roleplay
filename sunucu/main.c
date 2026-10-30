@@ -18,6 +18,7 @@
 #include "oyun.h"
 #include "ws.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -555,6 +556,138 @@ static void api_yukle(HttpIstek *r)
     buf_free(&b);
 }
 
+/* ------------------------------------------------------------------ oyuncunun kendi token resimleri */
+
+#define OYUNCU_RESMI_BOYUTU (8LL * 1024 * 1024)
+
+/* Oyuncunun oturumundaki kimliği; oturum yoksa 401 yazar ve 0 döner. */
+static int oyuncu_oturumu(HttpIstek *r, char oyuncu[17])
+{
+    char token[100];
+    int ok = 0;
+    if (http_cerez(r, "zm_oyuncu", token, sizeof token)) {
+        pthread_mutex_lock(&oyun_kilit);
+        ok = oturum_dogrula(token, 0, oyuncu, NULL);
+        pthread_mutex_unlock(&oyun_kilit);
+    }
+    if (!ok) http_hata(r->fd, 401, "Önce giriş yapmalısın.");
+    return ok;
+}
+
+/* Oyuncunun resim klasörü (tokenlar/oyuncular/<kimlik>) ve içindeki dosyanın göreli yolu; ad geçersizse 0. */
+static int oyuncu_resim_yolu(const char *oyuncu, const char *ad, char *klasor, char *goreli)
+{
+    snprintf(klasor, YOL_AZAMI, "tokenlar/oyuncular/%s", oyuncu);
+    if (!ad) return 1;
+    if (!dosya_adi_gecerli(ad) || !gorsel_uzantili(ad)) return 0;
+    int w = snprintf(goreli, YOL_AZAMI, "%s/%s", klasor, ad);
+    return w > 0 && w <= ESYA_YOLU_AZAMI; /* karakterin resim alanına sığmalı */
+}
+
+static int klasordeki_dosyalar(const char *tam)
+{
+    DIR *d = opendir(tam);
+    if (!d) return 0;
+    int n = 0;
+    struct dirent *e;
+    while ((e = readdir(d)))
+        if (e->d_name[0] != '.') n++;
+    closedir(d);
+    return n;
+}
+
+/* Oyuncu pulu için resim yükler: tokenlar/oyuncular/<kimliği>/<ad>. Yalnızca PNG, JPG, WEBP ya da GIF; en fazla 8 MB
+   ve AZAMI_OYUNCU_RESMI dosya. Aynı adda dosyası varsa üzerine yazılır. Resimleri yalnızca kendisi (ve GM) seçer. */
+static void api_oyuncu_yukle(HttpIstek *r)
+{
+    char oyuncu[17], ad[300] = "", klasor[YOL_AZAMI], goreli[YOL_AZAMI], tam_klasor[YOL_AZAMI], tam[YOL_AZAMI];
+    if (!oyuncu_oturumu(r, oyuncu)) return;
+    if (!http_sorgu(r, "ad", ad, sizeof ad) || !oyuncu_resim_yolu(oyuncu, ad, klasor, goreli)) {
+        http_hata(r->fd, 400, "PNG, JPG, WEBP ya da GIF bir resim seç (adı çok uzun olmasın).");
+        return;
+    }
+    if (r->icerik_uzunlugu < 0) {
+        http_hata(r->fd, 411, "Dosya boyutu bildirilmedi.");
+        return;
+    }
+    if (r->icerik_uzunlugu > OYUNCU_RESMI_BOYUTU || r->icerik_uzunlugu > yap.azami_yukleme) {
+        http_hata(r->fd, 413, "Resim çok büyük; en fazla 8 MB olabilir.");
+        return;
+    }
+    char ust[YOL_AZAMI];
+    snprintf(ust, sizeof ust, "%s/tokenlar/oyuncular", yap.oyun_klasoru);
+    mkdir(ust, 0775);
+    if (!tam_yol_kur(yap.oyun_klasoru, klasor, tam_klasor, sizeof tam_klasor) ||
+        !tam_yol_kur(yap.oyun_klasoru, goreli, tam, sizeof tam)) {
+        http_hata(r->fd, 400, "Yol geçersiz.");
+        return;
+    }
+    mkdir(tam_klasor, 0775);
+    if (!klasor_mu(tam_klasor) || klasor_mu(tam)) {
+        http_hata(r->fd, 500, "Resim klasörü açılamadı.");
+        return;
+    }
+    if (!var_mi(tam) && klasordeki_dosyalar(tam_klasor) >= AZAMI_OYUNCU_RESMI) {
+        char m[160];
+        snprintf(m, sizeof m, "En fazla %d resim yükleyebilirsin; önce birini sil.", AZAMI_OYUNCU_RESMI);
+        http_hata(r->fd, 409, m);
+        return;
+    }
+    char gecici[YOL_AZAMI + 64], rnd[17];
+    rastgele_hex(rnd, 8);
+    snprintf(gecici, sizeof gecici, "%s/.yukleniyor-%s", tam_klasor, rnd);
+    int fd = open(gecici, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0664);
+    if (fd < 0) {
+        http_hata(r->fd, 500, "Dosya yazılamadı.");
+        return;
+    }
+    int ok = http_govde_dosyaya(r, fd);
+    if (close(fd) != 0) ok = 0;
+    GorselBilgi g;
+    if (ok && !gorsel_bilgi(gecici, &g)) {
+        unlink(gecici);
+        http_hata(r->fd, 400, "Bu dosya bir resim değil (PNG, JPG, WEBP ya da GIF olmalı).");
+        return;
+    }
+    if (!ok || rename(gecici, tam) != 0) {
+        unlink(gecici);
+        http_hata(r->fd, 400, "Yükleme tamamlanamadı. Tekrar dene.");
+        return;
+    }
+    pthread_mutex_lock(&oyun_kilit);
+    dosyalar_degisti();
+    pthread_mutex_unlock(&oyun_kilit);
+    Buf b;
+    buf_init(&b);
+    buf_puts(&b, "{\"ok\":true,\"yol\":");
+    buf_json_str(&b, goreli);
+    buf_putc(&b, '}');
+    http_json(r->fd, 200, b.p, NULL);
+    buf_free(&b);
+}
+
+/* Oyuncu yüklediği bir resmi siler (pulundaysa pulu resimsiz kalır). */
+static void api_oyuncu_sil(HttpIstek *r)
+{
+    char oyuncu[17], klasor[YOL_AZAMI], goreli[YOL_AZAMI], tam[YOL_AZAMI];
+    if (!oyuncu_oturumu(r, oyuncu)) return;
+    Json *j = json_govde(r);
+    int gecerli = oyuncu_resim_yolu(oyuncu, json_metin(j, "ad"), klasor, goreli);
+    json_sil(j);
+    if (!gecerli || !tam_yol_kur(yap.oyun_klasoru, goreli, tam, sizeof tam)) {
+        http_hata(r->fd, 400, "Bu resim bulunamadı.");
+        return;
+    }
+    if (!var_mi(tam) || klasor_mu(tam) || unlink(tam) != 0) {
+        http_hata(r->fd, 404, "Bu resim bulunamadı.");
+        return;
+    }
+    pthread_mutex_lock(&oyun_kilit);
+    dosya_tasindi(goreli, NULL);
+    pthread_mutex_unlock(&oyun_kilit);
+    tamam(r->fd);
+}
+
 static void api_klasor(HttpIstek *r)
 {
     Json *j = json_govde(r);
@@ -720,6 +853,8 @@ static const struct {
     { "/api/gm-giris", 1, 0, api_gm_giris },
     { "/api/cikis", 1, 0, api_cikis },
     { "/api/temizle", 1, 0, api_temizle },
+    { "/api/oyuncu-yukle", 1, 0, api_oyuncu_yukle }, /* oyuncunun kendi token resimleri */
+    { "/api/oyuncu-sil", 1, 0, api_oyuncu_sil },
     { "/api/dosyalar", 0, 1, api_dosyalar }, /* GM dosya yöneticisi */
     { "/api/yukle", 1, 1, api_yukle },
     { "/api/klasor", 1, 1, api_klasor },
@@ -806,7 +941,7 @@ static void ws_oturumu(HttpIstek *r)
         } else if (tur == WS_PING) {
             istemciye_gonder(c, WS_PONG, veri, n);
         } else if (tur == WS_PONG) {
-            /* canlı */
+            istemci_pong(c, veri, n); /* canlı; gecikmesi ölçülür */
         } else if (tur == WS_KAPAT) {
             istemciye_gonder(c, WS_KAPAT, veri, n >= 2 ? 2 : 0);
             devam = 0;
@@ -911,6 +1046,7 @@ static void *kaydedici(void *arg)
     while (!durdur) {
         sleep(1);
         oyun_kaydet(0);
+        oyun_tik();
     }
     return NULL;
 }

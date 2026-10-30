@@ -1,8 +1,8 @@
 /*
  * Ses efektleri. Hepsi WebAudio ile anında üretilir (ses dosyası yok); her görsel efektin bir sesi vardır:
  * yürüme, saldırı (savurma, fırlatma, isabet, ıska), büyü (yapma, küre, çarpma, iyileşme), ölüm ve dirilme, işaret,
- * zar ve kritik, sıra, GM'e istek, portal, para ve eşya alma, eşya kırma. Tarayıcı ses çalmaya ilk tıklamadan sonra
- * izin verir.
+ * zar ve kritik, sıra, GM'e istek, portal, para ve eşya alma, eşya kırma, tepkiler (alkış, kahkaha, ağlama, bağırma).
+ * Tarayıcı ses çalmaya ilk tıklamadan sonra izin verir.
  * Açık/kapalı tercihi bu tarayıcıda saklanır.
  */
 
@@ -98,6 +98,36 @@ function hisirti(c, { t = c.currentTime, sure = 0.2, tepe = 0.3, atak = 0.005, f
   k.stop(t + atak + sure + 0.05);
 }
 
+/* İnsan sesine benzeyen bir hece: testere dalgası, iki formant süzgecinden geçer (a sesi: ~800 ve ~1200 Hz) */
+function hece(c, { t, f1, f2 = f1, sure = 0.15, tepe = 0.2, formant = [800, 1200], titreme = 0 }) {
+  const o = c.createOscillator();
+  o.type = 'sawtooth';
+  o.frequency.setValueAtTime(f1, t);
+  if (f2 !== f1) o.frequency.exponentialRampToValueAtTime(f2, t + sure);
+  if (titreme) {
+    const lfo = c.createOscillator();
+    const lg = c.createGain();
+    lfo.frequency.value = 7;
+    lg.gain.value = titreme;
+    lfo.connect(lg);
+    lg.connect(o.frequency);
+    lfo.start(t);
+    lfo.stop(t + sure + 0.05);
+  }
+  const g = zarf(c, t, tepe, Math.min(0.03, sure / 4), sure);
+  for (const f of formant) {
+    const b = c.createBiquadFilter();
+    b.type = 'bandpass';
+    b.frequency.value = f;
+    b.Q.value = 6;
+    o.connect(b);
+    b.connect(g);
+  }
+  g.connect(ana);
+  o.start(t);
+  o.stop(t + sure + 0.08);
+}
+
 /* Bir sesi bir süre sonra çalmak için (gecikme saniye) */
 const calis = (fn) => (gecikme = 0, ...arg) => {
   const c = baglam();
@@ -184,5 +214,33 @@ export const ses = {
   kir: calis((c, t) => {
     hisirti(c, { t, sure: 0.18, tepe: 0.35, filtre: 'lowpass', f1: 1600, f2: 400 });
     ton(c, { f1: 140, f2: 60, t, sure: 0.15, tepe: 0.3 });
+  }),
+  /** Tepki: alkış (art arda el çırpma); guc 0..1 */
+  alkis: calis((c, t, guc = 1) => {
+    let s = t;
+    for (let i = 0; i < 7; i++) {
+      hisirti(c, { t: s, sure: 0.05, tepe: 0.42 * guc, atak: 0.002, f1: 1100 + Math.random() * 900, q: 1.4 });
+      s += 0.11 + Math.random() * 0.06;
+    }
+  }),
+  /** Tepki: kahkaha ("ha ha ha", perdesi düşerek) */
+  kahkaha: calis((c, t, guc = 1) => {
+    for (let i = 0; i < 5; i++) {
+      const f = 290 - i * 18 + Math.random() * 12;
+      hece(c, { t: t + i * 0.16, f1: f * 1.12, f2: f, sure: 0.11, tepe: 0.3 * guc, formant: [750, 1150] });
+      hisirti(c, { t: t + i * 0.16, sure: 0.05, tepe: 0.06 * guc, filtre: 'highpass', f1: 2500 });
+    }
+  }),
+  /** Tepki: ağlama (titreyen, inen hıçkırıklar) */
+  aglama: calis((c, t, guc = 1) => {
+    [0, 0.42, 0.95].forEach((d, i) => {
+      hece(c, { t: t + d, f1: 520 - i * 25, f2: 330, sure: 0.38, tepe: 0.2 * guc, formant: [450, 950], titreme: 18 });
+    });
+  }),
+  /** Tepki: bağırma (yüksek, kısa bir "hey!"); uzaktan duyulunca daha kısık (guc) */
+  bagir: calis((c, t, guc = 1) => {
+    hece(c, { t, f1: 230, f2: 330, sure: 0.16, tepe: 0.45 * guc, formant: [850, 1300] });
+    hece(c, { t: t + 0.15, f1: 330, f2: 250, sure: 0.4, tepe: 0.5 * guc, formant: [700, 1150], titreme: 6 });
+    hisirti(c, { t, sure: 0.5, tepe: 0.08 * guc, f1: 1800, q: 0.8 });
   }),
 };

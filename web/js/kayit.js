@@ -1,19 +1,25 @@
 import { h, saat, azHareket } from './ortak.js';
-import { zarSimgesi } from './zar-sekilleri.js';
+import { zarSimgesi, zarEtiketi } from './zar-sekilleri.js';
 import { ses } from './ses.js';
 
 const AZAMI = 300;
 
-/** Olay kaydı: zar sonuçları (kuralların attıkları da), sıra değişimleri, saldırılar, büyüler, ölümler, kuralların
- * duyuruları, eşya bildirimleri. */
+/** Olay kaydı: zar sonuçları (kuralların attıkları da), sıra değişimleri, saldırılar, büyüler, ölümler, tepkiler,
+ * kuralların duyuruları, eşya bildirimleri. Her satırda o kaydı kimlerin gördüğü yazar ("herkes", "sen ve GM"...). */
 export function kayitOlustur(liste) {
   const altaYakin = () => liste.scrollHeight - liste.scrollTop - liste.clientHeight < 80;
   const sonaKaydir = () => {
     liste.scrollTop = liste.scrollHeight;
   };
 
+  /* Saat ve kimlerin gördüğü */
   function zaman(g) {
-    return h('time', { class: 'entry-time', datetime: new Date(g.zaman).toISOString(), text: saat(g.zaman) });
+    return h(
+      'span',
+      { class: 'entry-meta' },
+      g.gor ? h('span', { class: `seen${g.gor === 'herkes' ? ' is-all' : ''}`, title: `Bu kaydı görenler: ${g.gor}`, text: g.gor }) : null,
+      h('time', { class: 'entry-time', datetime: new Date(g.zaman).toISOString(), text: saat(g.zaman) }),
+    );
   }
 
   function aralik(sonuc) {
@@ -47,11 +53,12 @@ export function kayitOlustur(liste) {
         zarlar.append(h('span', { class: 'roll-num', text: String(p.deger) }));
         return;
       }
+      /* Simgede zarın türü (d4 için üçgende 4), yanında çıkan sayı */
       for (const d of p.zarlar) {
         const siniflar = [!d.t && 'is-dropped', d.t && d.v === p.yuz && 'is-max', d.t && d.v === 1 && 'is-min'].filter(Boolean).join(' ');
-        const simge = zarSimgesi(p.yuz, p.yuz === 100 && d.v === 100 ? '00' : d.v, { siniflar, elenmis: !d.t });
+        const simge = zarSimgesi(p.yuz, zarEtiketi(p.yuz), { siniflar, elenmis: !d.t });
         simge.style.setProperty('--i', String(Math.min(sira++, 10)));
-        zarlar.append(simge);
+        zarlar.append(h('span', { class: `roll-die ${siniflar}`.trim(), title: `d${p.yuz}: ${d.v}${d.t ? '' : ' (sayılmadı)'}` }, simge, h('b', { class: 'roll-val', text: String(d.v) })));
       }
     });
 
@@ -118,9 +125,11 @@ export function kayitOlustur(liste) {
       case 'kural':
         return satir(g, 'rule');
       case 'gm':
-        return satir(g, 'gm-note', 'yalnızca GM');
+        return satir(g, 'gm-note');
       case 'ozel':
-        return satir(g, 'private', 'yalnızca sana');
+        return satir(g, 'private');
+      case 'tepki':
+        return satir(g, 'reaction');
       case 'esya':
         return satir(g, 'item', 'envanter');
       case 'saldiri':
