@@ -16,6 +16,7 @@ typedef struct {
     long long azami_yukleme;      /* bayt */
     char ilk_sifre[100];          /* OYUN_SIFRESI: şifre hiç belirlenmemişse kullanılır */
     char gm_sifresi[200];         /* GM_SIFRESI: GM ekranına girerken sorulur */
+    char surum[80];               /* oyunun sürümü: tarayıcılar farklı bir sürümün belleğini silip sayfayı yeniler */
 } Yapilandirma;
 
 extern Yapilandirma yap;
@@ -41,8 +42,7 @@ typedef struct Istemci {
     /* Aşağıdakiler oyun_kilit altında kullanılır */
     double kova; /* hız sınırı */
     long long kova_ms;
-    long long kesif_harita, kesif_surum; /* keşif listesinin ne kadarı gönderildi */
-    int kesif_n;
+    long long kesif_harita, kesif_surum, duvar_surum; /* hangi haritanın keşfi ve duvarları gönderildi */
     struct Istemci *sonraki;
 } Istemci;
 

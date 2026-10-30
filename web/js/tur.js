@@ -7,7 +7,7 @@ const AZAMI_ISIK = 20;
  * Tur kartı: kimin sırası, sıra şeridi, Fallout'taki gibi yanan enerji ışıkları, bekleyen istek ve "Turu bitir".
  * GM için enerji düzeltme, sırayı geçme ve durdurma düğmeleri de burada.
  */
-export function turKartiOlustur(kok, { gonder }) {
+export function turKartiOlustur(kok, { gonder, yolUzunlugu }) {
   let durum = null;
   let sonSiradaki = null;
 
@@ -34,10 +34,10 @@ export function turKartiOlustur(kok, { gonder }) {
 
   function bekleyenIstek(ist) {
     if (!ist) return null;
-    const ben = durum.tokenler?.find((t) => t.ben);
+    const L = ist.tur === 'hareket' ? yolUzunlugu?.(ist) : null;
     const metin =
       ist.tur === 'hareket'
-        ? `Yürüme isteği${ben ? ` · ${sayiYaz(Math.hypot(ist.x2 - ben.x, ist.y2 - ben.y))} kare` : ''}`
+        ? `Yürüme isteği${L !== null && L !== undefined ? ` · ${sayiYaz(L)} kare` : ''}`
         : ist.tur === 'buyu'
           ? `Büyü: ${ist.hedef === durum.ben.id ? 'kendine' : ist.hedef_ad} (${ist.buyu})`
           : `Saldırı: ${ist.hedef_ad} (${ist.esya?.ad || 'eşya'})`;

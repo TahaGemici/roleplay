@@ -22,11 +22,6 @@
 /* Eşyasız bir karakterin ağırlığı: o->agirlik = KARAKTER_AGIRLIGI + eşyalarının ağırlıkları */
 #define KARAKTER_AGIRLIGI 70
 
-/* Para bakır cinsinden tutulur: o->para += 3 * ALTIN + 10 * GUMUS; */
-#define BAKIR 1
-#define GUMUS 4
-#define ALTIN 200
-
 /* ------------------------------------------------------------------ eşya */
 
 typedef struct {
@@ -48,7 +43,8 @@ typedef struct {
     const char *ad;     /* adı (değiştirme) */
 
     float x, y;         /* konumu, kare biriminde: (0,0) haritanın sol üst köşesi, (0.5, 0.5) ilk karenin
-                           ortası. Değiştirirsen karakter oraya taşınır (harita sınırları içinde kalır). */
+                           ortası. Değiştirirsen karakter oraya düz çizgide itilir: harita sınırları içinde kalır,
+                           arada duvar varsa duvarın önünde durur (hareket() için oradaki açıklamaya bak). */
     float can;          /* 0 ya da altına inerse ölür: saldırı ve büyüde hemen, başka zaman sırası bitince */
     float odak;
     float zirh;
@@ -57,7 +53,9 @@ typedef struct {
                            belirlersin; 0 ya da altına inince sıra geçer. */
     float agirlik;      /* ağırlığı: KARAKTER_AGIRLIGI (70) + eşyalarının ağırlıkları. Sunucu hesaplar (salt okunur);
                            arttıkça haritadaki pulu büyür (70'te 1 kat, 140'ta 2 kat). */
-    int para;           /* parası, bakır cinsinden: 1 altın = 50 gümüş = 200 bakır (ALTIN, GUMUS, BAKIR) */
+    int altin;          /* parası: altın, gümüş ve bakır ayrı ayrı sayılır, birbirine çevrilmez. 0'dan aşağı inmez. */
+    int gumus;
+    int bakir;
 
     Esya envanter[ENVANTER_AZAMI]; /* envanter[0] her zaman yumruktur; eşyalar envanter[envanter_adet - 1]'e kadar */
     int envanter_adet;  /* dizideki eşya sayısı (yumruk dahil) */
@@ -76,6 +74,14 @@ typedef struct {
 extern Harita harita;
 extern int tur_sayisi; /* kaçıncı tur (1, 2, 3...) */
 
+/* hareket() çağrılırken: karakterin x, y'ye yürüyeceği yolun uzunluğu (kare). Duvar varsa yol duvarların etrafından
+   dolaşır, bu yüzden düz çizgiden uzun olabilir. Başka zaman 0. */
+extern float yol_uzunlugu;
+
+/* hareket() içinde: yolun başından uzunluk kadar ilerideki noktayı *x, *y'ye yazar (yolun sonunu geçerse hedefi).
+   Yolun bir kısmını yürütmek için: yol_noktasi(o->enerji, &o->x, &o->y); return 1; */
+void yol_noktasi(float uzunluk, float *x, float *y);
+
 /* ------------------------------------------------------------------ kurallar.c'de senin yazdıkların */
 
 /* Eşya sınıfları; liste NULL ile biter. Sunucu her sınıf için oyun/esyalar/<sınıf>/ klasörünü açar ve
@@ -93,12 +99,15 @@ extern const char *const buyuler[];
 void her_tur(Oyuncu *o);
 
 /* Sırası gelen oyuncu haritada bir yere tıkladı ve GM bu yürüyüşü onayladı (GM hedefi kaydırdıysa x, y
-   kaydırılmış haldir). Çağrıldığında o->x, o->y oyuncunun şu anki yeri, x, y gitmek istediği yerdir.
+   kaydırılmış haldir). Çağrıldığında o->x, o->y oyuncunun şu anki yeri, x, y gitmek istediği yerdir. Arada duvar
+   varsa karakter duvarın etrafından dolaşır: yürüyeceği yolun uzunluğu yol_uzunlugu'dur (düz çizgiden uzun olabilir).
    Enerjiyi sen düşürürsün; sunucu yürüyüş için kendiliğinden enerji harcamaz.
      1 döndürürsen oyuncu x, y'ye yürür.
      0 döndürürsen yerinde kalır (ör. enerjisi yetmiyorsa). Nedenini bildir(o, ...) ile yazarsan
        oyuncunun ekranında uyarı olarak da çıkar.
-     o->x, o->y'yi değiştirip 1 döndürürsen yeni yazdığın yere yürür (ör. yolu kısaltmak için).
+     o->x, o->y'yi değiştirip 1 döndürürsen yeni yazdığın yere yürür (ör. yolu kısaltmak için:
+       yol_noktasi(o->enerji, &o->x, &o->y) yolun enerjinin yettiği yerine kadar yürütür). Oraya da duvarların
+       etrafından gider; yol yoksa yerinde kalır ve hareket() hiç çağrılmamış gibi olur.
        Yazdığın yer şu anki yerle aynıysa x, y'ye yürür; yerinde kalsın istiyorsan 0 döndür.
    Dönüşten sonra enerjisi 0 ya da altındaysa sırası biter. GM'in tokenları sürüklemesi bu fonksiyonu
    çağırmaz. Yürüyen, yolunun üstündeki eşyaları alır (envanterinde yer varsa); yürüyüşü bir portalda

@@ -39,6 +39,8 @@ void rastgele_hex(char *out, size_t bayt); /* out en az 2*bayt+1 uzunlukta */
 void sha1(const void *data, size_t len, unsigned char out[20]);
 void sha1_hex(const char *s, char out[41]);
 void base64_kodla(const unsigned char *in, size_t n, char *out); /* out en az 4*((n+2)/3)+1 */
+/* Çözülen baytları *out'a ayırır (free ile bırakılır); bayt sayısını ya da bozuksa -1 döner. */
+long long base64_coz(const char *in, unsigned char **out);
 
 /* UTF-8 geçerli mi? */
 int utf8_gecerli(const char *s, size_t n);

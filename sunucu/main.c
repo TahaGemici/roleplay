@@ -5,6 +5,7 @@
  *   /gm         GM ekranı (giriş: .env dosyasındaki GM_SIFRESI)
  *   /ws         WebSocket: oyunun bütün canlı olayları
  *   /oyun/...   oyun klasöründeki dosyalar (yetkiye göre)
+ *   /s/<sürüm>/ arayüzün dosyaları (stil, betikler): her sürümün adresi ayrıdır, tarayıcı eski sürümünkini kullanmaz
  *   /api/...    giriş ve GM dosya yöneticisi
  *
  * Her bağlantı kendi iş parçacığında çalışır; oyunun durumu tek bir kilitle korunur.
@@ -38,6 +39,14 @@
 #define AZAMI_BAGLANTI 300
 #define JSON_AZAMI (64 * 1024)
 
+/* Derlemenin sürüm etiketi (make SURUM=v42); sunucunun asıl sürümü buna programın ve arayüzün özeti eklenerek
+   bulunur (surum_hesapla). */
+#ifndef SURUM
+#define SURUM "yerel"
+#endif
+
+#define SURUM_HATASI "Oyun güncellendi. Sayfayı yenile (F5)."
+
 static atomic_int durdur; /* sinyal işleyicisi yazar, kaydedici iş parçacığı okur (kilitsiz atomik) */
 static atomic_int baglanti_sayisi;
 
@@ -45,7 +54,7 @@ static const char *SAYFA_BASLIKLARI =
     "Content-Security-Policy: default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; "
     "connect-src 'self'; font-src 'self'; media-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; "
     "frame-ancestors 'none'\r\n"
-    "Cache-Control: no-cache\r\n";
+    "Cache-Control: no-store\r\n";
 
 /* Oyun klasöründeki dosyalar betik çalıştıramaz: sayfa korumalı alanda (sandbox) açılır. */
 static const char *DOSYA_CSP =
@@ -144,6 +153,64 @@ static void tamam(int fd)
     http_json(fd, 200, "{\"ok\":true}", NULL);
 }
 
+/* ------------------------------------------------------------------ sürüm */
+
+/* Dosyanın içeriğini tampona ekler */
+static void dosyayi_ekle(Buf *b, const char *yol)
+{
+    FILE *f = fopen(yol, "rb");
+    if (!f) return;
+    char tmp[65536];
+    size_t k;
+    while ((k = fread(tmp, 1, sizeof tmp, f)) > 0) buf_add(b, tmp, k);
+    fclose(f);
+}
+
+/* Sürüm: derlemenin etiketi ve programla arayüzün (web klasörünün) özeti, ör. "v42-1a2b3c4d". Biri değişince
+   tarayıcılar ellerindeki eski sürümün belleğini siler ve sayfayı yeniler. */
+static void surum_hesapla(void)
+{
+    Buf b;
+    buf_init(&b);
+    dosyayi_ekle(&b, "/proc/self/exe");
+    DosyaListesi l;
+    dosyalari_bul(yap.web_klasoru, 0, &l);
+    for (int i = 0; i < l.n; i++) {
+        char tam[YOL_AZAMI];
+        buf_puts(&b, l.yol[i]);
+        buf_putc(&b, '\0');
+        if (tam_yol_kur(yap.web_klasoru, l.yol[i], tam, sizeof tam)) dosyayi_ekle(&b, tam);
+    }
+    dosya_listesi_sil(&l);
+    unsigned char ozet[20];
+    sha1(b.p ? b.p : "", b.len, ozet);
+    buf_free(&b);
+    char etiket[40];
+    size_t j = 0;
+    for (const char *p = SURUM; *p && j + 1 < sizeof etiket; p++)
+        if ((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9') || *p == '.' || *p == '-' || *p == '_')
+            etiket[j++] = *p;
+    etiket[j] = '\0';
+    snprintf(yap.surum, sizeof yap.surum, "%s-%02x%02x%02x%02x", j ? etiket : "yerel", ozet[0], ozet[1], ozet[2], ozet[3]);
+}
+
+/* Tarayıcının bildirdiği sürüm bu sunucununki değilse 409 ve sunucunun sürümüyle yanıt verir (tarayıcı belleğini silip
+   sayfayı yeniler; eski sayfalar mesajı gösterir). Uyuyorsa 1 döner. */
+static int surum_uygun(const HttpIstek *r, const char *surum)
+{
+    if (surum && !strcmp(surum, yap.surum)) return 1;
+    Buf b;
+    buf_init(&b);
+    buf_puts(&b, "{\"hata\":");
+    buf_json_str(&b, SURUM_HATASI);
+    buf_puts(&b, ",\"surum\":");
+    buf_json_str(&b, yap.surum);
+    buf_putc(&b, '}');
+    http_json(r->fd, 409, b.p, NULL);
+    buf_free(&b);
+    return 0;
+}
+
 /* ------------------------------------------------------------------ giriş denemesi sınırı */
 
 static pthread_mutex_t deneme_kilit = PTHREAD_MUTEX_INITIALIZER;
@@ -228,6 +295,34 @@ static void web_dosyasi(HttpIstek *r, const char *goreli)
     dosya_yanitla(r, tam, icerik_turu(goreli), "Cache-Control: no-cache\r\n");
 }
 
+/* Sayfa: içindeki %SURUM% yerine sunucunun sürümü yazılır; stil ve betikler o sürümün adresinden (/s/<sürüm>/) gelir.
+   Sayfa hiç saklanmaz: her açılışta yenisi alınır. */
+static void sayfa(HttpIstek *r)
+{
+    char tam[YOL_AZAMI];
+    snprintf(tam, sizeof tam, "%s/index.html", yap.web_klasoru);
+    Buf ham, b;
+    buf_init(&ham);
+    buf_init(&b);
+    dosyayi_ekle(&ham, tam);
+    if (!ham.len) {
+        buf_free(&ham);
+        http_hata(r->fd, 500, "index.html bulunamadı; WEB_KLASORU ayarını kontrol et.");
+        return;
+    }
+    buf_putc(&ham, '\0');
+    const char *p = ham.p, *yer;
+    while ((yer = strstr(p, "%SURUM%"))) {
+        buf_add(&b, p, (size_t)(yer - p));
+        buf_puts(&b, yap.surum);
+        p = yer + 7;
+    }
+    buf_puts(&b, p);
+    http_yanit(r->fd, 200, "text/html; charset=utf-8", SAYFA_BASLIKLARI, b.p, b.len);
+    buf_free(&ham);
+    buf_free(&b);
+}
+
 static void oyun_dosyasi(HttpIstek *r)
 {
     const char *goreli = r->yol + 6; /* "/oyun/" sonrası */
@@ -280,6 +375,10 @@ static void giris(HttpIstek *r, int gm)
     Json *j = json_govde(r);
     if (!j) {
         http_hata(r->fd, 400, "İstek okunamadı.");
+        return;
+    }
+    if (!surum_uygun(r, json_metin(j, "surum"))) {
+        json_sil(j);
         return;
     }
     char token[65], hata[200] = "GM şifresi yanlış.";
@@ -571,15 +670,34 @@ static void api_bilgi(HttpIstek *r)
     pthread_mutex_lock(&oyun_kilit);
     oyun_bilgisi(&b);
     pthread_mutex_unlock(&oyun_kilit);
+    /* oyun_bilgisi bir nesne yazar; sonuna sürüm eklenir */
+    if (b.len && b.p[b.len - 1] == '}') {
+        b.len--;
+        buf_puts(&b, ",\"surum\":");
+        buf_json_str(&b, yap.surum);
+        buf_putc(&b, '}');
+    }
     http_json(r->fd, 200, b.p, NULL);
     buf_free(&b);
 }
 
-/* Tarayıcı çerezi göremez (HttpOnly); oturumun geçerli olup olmadığını buradan öğrenir. */
+/* Tarayıcı başka bir sürümün belleğiyle açıldı: HTTP önbelleğini sildirir (localStorage'ı tarayıcı kendisi siler). */
+static void api_temizle(HttpIstek *r)
+{
+    http_yanit(r->fd, 204, NULL, "Cache-Control: no-store\r\nClear-Site-Data: \"cache\"\r\n", NULL, 0);
+}
+
+/* Tarayıcı çerezi göremez (HttpOnly); oturumun geçerli olup olmadığını buradan öğrenir. Sürüm bildirmeyen (eski)
+   sayfa giriş ekranına döner; girerken de sürümü tutmadığı için yenilemesi istenir. */
 static void api_oturum(HttpIstek *r)
 {
-    char rol[16] = "", token[100];
+    char rol[16] = "", token[100], surum[100];
     http_sorgu(r, "rol", rol, sizeof rol);
+    if (!http_sorgu(r, "surum", surum, sizeof surum)) {
+        http_hata(r->fd, 401, SURUM_HATASI);
+        return;
+    }
+    if (!surum_uygun(r, surum)) return;
     int gm = !strcmp(rol, "gm"), ok = 0;
     if (http_cerez(r, gm ? "zm_gm" : "zm_oyuncu", token, sizeof token)) {
         pthread_mutex_lock(&oyun_kilit);
@@ -601,6 +719,7 @@ static const struct {
     { "/api/giris", 1, 0, api_giris },
     { "/api/gm-giris", 1, 0, api_gm_giris },
     { "/api/cikis", 1, 0, api_cikis },
+    { "/api/temizle", 1, 0, api_temizle },
     { "/api/dosyalar", 0, 1, api_dosyalar }, /* GM dosya yöneticisi */
     { "/api/yukle", 1, 1, api_yukle },
     { "/api/klasor", 1, 1, api_klasor },
@@ -628,8 +747,10 @@ static void api(HttpIstek *r)
 
 static void ws_oturumu(HttpIstek *r)
 {
-    char rol[16] = "";
+    char rol[16] = "", surum[100] = "";
     http_sorgu(r, "rol", rol, sizeof rol);
+    http_sorgu(r, "surum", surum, sizeof surum);
+    if (!surum_uygun(r, surum)) return; /* başka bir sürümün sayfası bu sunucuyla oynamasın */
     int gm = !strcmp(rol, "gm");
     if (!koken_uygun(r)) {
         http_hata(r->fd, 403, "Bu bağlantı başka bir siteden geldi.");
@@ -747,11 +868,19 @@ static void yonlendir(HttpIstek *r)
         http_yanit(r->fd, 200, "text/plain; charset=utf-8", "Cache-Control: no-store\r\n", "ok", 2);
         return;
     }
-    if (!strcmp(y, "/") || !strcmp(y, "/gm") || !strcmp(y, "/gm/")) {
-        char tam[YOL_AZAMI];
-        snprintf(tam, sizeof tam, "%s/index.html", yap.web_klasoru);
-        if (!http_dosya_gonder(r->fd, tam, "text/html; charset=utf-8", SAYFA_BASLIKLARI))
-            http_hata(r->fd, 500, "index.html bulunamadı; WEB_KLASORU ayarını kontrol et.");
+    if (!strcmp(y, "/") || !strcmp(y, "/gm") || !strcmp(y, "/gm/") || !strcmp(y, "/index.html")) {
+        sayfa(r);
+        return;
+    }
+    if (!strncmp(y, "/s/", 3)) {
+        /* /s/<sürüm>/js/ana.js: sürüm hangisi olursa olsun bu sunucunun dosyası verilir; sayfa sürümü kendisi
+           denetler */
+        const char *bolu = strchr(y + 3, '/');
+        if (!bolu) {
+            http_hata(r->fd, 404, "Bulunamadı.");
+            return;
+        }
+        web_dosyasi(r, bolu + 1);
         return;
     }
     web_dosyasi(r, y + 1);
@@ -837,6 +966,7 @@ int main(void)
     const char *host = ortam("HOST", "127.0.0.1"), *port = ortam("PORT", "3000");
     snprintf(yap.dinle, sizeof yap.dinle, "http://%s:%s", strchr(host, ':') ? "[::1]" : host, port);
 
+    surum_hesapla();
     oyun_baslat();
     oyun_kaydet(1);
 
@@ -872,7 +1002,7 @@ int main(void)
     pthread_create(&kt, NULL, kaydedici, NULL);
     pthread_detach(kt);
 
-    printf("Roleplay çalışıyor: %s   (oyun klasörü: %s)\n", yap.dinle, yap.oyun_klasoru);
+    printf("Roleplay çalışıyor: %s   (sürüm %s, oyun klasörü: %s)\n", yap.dinle, yap.surum, yap.oyun_klasoru);
     gm_bilgisini_yazdir();
 
     pthread_attr_t oz;

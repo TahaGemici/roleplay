@@ -43,12 +43,3 @@ int parca_daire_kesisimi(double ax, double ay, double bx, double by, double cx, 
     *t1 = s1 > 1 ? 1 : s1;
     return *t1 - *t0 > 1e-9 || c <= PAY;
 }
-
-int kapsul_icinde(const Kapsul *ic, const Kapsul *dis)
-{
-    /* Bir noktanın dis parçasına uzaklığı, ic parçası boyunca dışbükey bir fonksiyondur:
-       en büyük değeri uçlardadır. Uçlar r payıyla içerideyse bütün kapsül içeridedir. */
-    double d1 = nokta_parca_mesafesi(ic->x1, ic->y1, dis->x1, dis->y1, dis->x2, dis->y2);
-    double d2 = nokta_parca_mesafesi(ic->x2, ic->y2, dis->x1, dis->y1, dis->x2, dis->y2);
-    return d1 + ic->r <= dis->r + 1e-3 && d2 + ic->r <= dis->r + 1e-3;
-}

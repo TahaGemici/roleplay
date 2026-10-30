@@ -39,7 +39,7 @@ mkdir -p "$CIKTI" "$KOK/usr/bin" "$KOK/usr/lib" "$KOK/usr/share/roleplay/kurulum
 	"$KOK/proc" "$KOK/sys" "$KOK/dev" "$KOK/run" "$KOK/tmp" "$KOK/veri"
 
 # 1) Sunucu: musl ile statik (imajda kütüphane yok), adresleri her açılışta rastgele (static-pie), sembolsüz.
-make -s HEDEF="$KOK/usr/bin/roleplay" CC="$CC" \
+make -s HEDEF="$KOK/usr/bin/roleplay" CC="$CC" SURUM="$SURUM" \
 	CFLAGS="-O2 -fPIE -fstack-protector-strong" LDFLAGS="-static-pie -s"
 
 # 2) Web arayüzü ve konteyner ayarları (kur.sh ayarları imajdan alıp sunucuya yazar)

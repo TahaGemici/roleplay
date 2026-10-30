@@ -1,4 +1,4 @@
-import { $, h, throttle, debounce, bildir, dosyaYukle, dosyaAdi, sayiYaz, adKisalt, yolKodla, paraParcala, paraBirlestir } from './ortak.js';
+import { $, h, throttle, debounce, bildir, dosyaYukle, dosyaAdi, sayiYaz, adKisalt, yolKodla, SIKKELER, sikkeSayisi } from './ortak.js';
 import { onay, formAc, goster } from './pencere.js';
 import { esyaKarti, esyaOnizle, grupla, agirlikYaz } from './envanter.js';
 import { STATLAR } from './tur.js';
@@ -23,8 +23,8 @@ function depoYaz(ad, deger) {
   }
 }
 
-/** GM paneli: harita, görüş, ızgara, tur sırası, karakterler (yerleştirme, statlar, envanter, görünüm), eşyalar,
- * ayarlar ve istekler. Karakterler ve eşyalar listeden haritaya sürüklenip bırakılır. */
+/** GM paneli: harita, duvarlar, görüş, ızgara, tur sırası, karakterler (yerleştirme, statlar, envanter, görünüm,
+ * NPC kopyalama), eşyalar, ayarlar ve istekler. Karakterler ve eşyalar listeden haritaya sürüklenip bırakılır. */
 export function gmPaneliOlustur({ gonder, harita, gorunumAc }) {
   let durum = null;
   let secili = null;
@@ -273,6 +273,80 @@ export function gmPaneliOlustur({ gonder, harita, gorunumAc }) {
     haritaYukle([...e.dataTransfer.files]);
   });
 
+  // ------------------------------------------------------------ duvarlar
+
+  let duvarKipi = null; // 'ciz' | 'sil' | null
+  const geriAlinacak = []; // bu oturumda çizilen duvarların kimlikleri (son çizilen sonda)
+
+  function kipSec(kip) {
+    duvarKipi = duvarKipi === kip ? null : kip;
+    harita.duvarKipi(duvarKipi);
+    $('#duvar-ciz').setAttribute('aria-pressed', String(duvarKipi === 'ciz'));
+    $('#duvar-sil').setAttribute('aria-pressed', String(duvarKipi === 'sil'));
+    $('#duvar-ciz').classList.toggle('btn-primary', duvarKipi === 'ciz');
+    $('#duvar-sil').classList.toggle('btn-danger-solid', duvarKipi === 'sil');
+  }
+  function duvarGeriAl() {
+    const duran = new Set((durum?.duvarlar || []).map((w) => w[0])); /* sonradan silinenler atlanır */
+    let id;
+    do id = geriAlinacak.pop();
+    while (id !== undefined && !duran.has(id));
+    if (id === undefined) return bildir('Geri alınacak duvar yok.');
+    gonder({ t: 'duvar_sil', id });
+  }
+  $('#duvar-ciz').addEventListener('click', () => kipSec('ciz'));
+  $('#duvar-sil').addEventListener('click', () => kipSec('sil'));
+  $('#duvar-geri').addEventListener('click', duvarGeriAl);
+  $('#duvar-temizle').addEventListener('click', async () => {
+    const evet = await onay({
+      baslik: 'Bu haritadaki bütün duvarlar silinsin mi?',
+      metin: 'Oyuncular duvarların arkasını görmeye ve her yere düz yürümeye başlar. Geri alınamaz.',
+      dugme: 'Hepsini sil',
+      tehlikeli: true,
+    });
+    if (!evet) return;
+    geriAlinacak.length = 0;
+    gonder({ t: 'duvarlari_sil' });
+  });
+  const duvarIzgara = $('#duvar-izgara');
+  duvarIzgara.checked = depoOku('roleplay.duvar-izgara', true);
+  harita.izgarayaYapis(duvarIzgara.checked);
+  duvarIzgara.addEventListener('change', () => {
+    depoYaz('roleplay.duvar-izgara', duvarIzgara.checked);
+    harita.izgarayaYapis(duvarIzgara.checked);
+  });
+  const duvarGoster = $('#duvar-goster');
+  duvarGoster.checked = depoOku('roleplay.duvar-goster', true);
+  harita.duvarlariGoster(duvarGoster.checked);
+  duvarGoster.addEventListener('change', () => {
+    depoYaz('roleplay.duvar-goster', duvarGoster.checked);
+    harita.duvarlariGoster(duvarGoster.checked);
+  });
+  /* Esc: çizilen çizgiyi bitirir, çizgi yoksa duvar kipinden çıkar. Ctrl+Z: son çizilen duvarı geri alır. */
+  window.addEventListener('keydown', (e) => {
+    if (e.defaultPrevented || !durum?.harita || e.target.closest?.('input, textarea, select, [contenteditable], dialog')) return;
+    if (e.key === 'Escape' && duvarKipi) {
+      if (!harita.zinciriBitir()) kipSec(duvarKipi);
+      e.preventDefault();
+    } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z' && geriAlinacak.length) {
+      e.preventDefault();
+      duvarGeriAl();
+    }
+  });
+
+  function duvarlarCiz() {
+    const hr = durum.harita;
+    $('#duvar-ayar').hidden = !hr;
+    if (!hr) {
+      if (duvarKipi) kipSec(duvarKipi);
+      return;
+    }
+    const n = durum.duvarlar?.length || 0;
+    $('#duvar-sayi').textContent = n ? `Bu haritada ${n} duvar var.` : 'Bu haritada duvar yok.';
+    $('#duvar-temizle').disabled = !n;
+    $('#duvar-geri').disabled = !geriAlinacak.length;
+  }
+
   // ------------------------------------------------------------ ızgara: harita boyutu ve çizgiler
 
   const izGen = $('#iz-gen');
@@ -470,10 +544,9 @@ export function gmPaneliOlustur({ gonder, harita, gorunumAc }) {
     const etiketler = [k.npc ? 'NPC' : 'oyuncu', k.olu && 'ölü', k.gizli && 'gizli', !k.npc && !k.cevrimici && 'bağlı değil'].filter(Boolean);
     $('#kd-etiket').textContent = etiketler.join(' · ');
     $('#kd-harita').textContent = k.harita ? (k.burada ? 'Baktığın haritada' : `Haritası: ${dosyaAdi(k.harita)}`) : 'Hiçbir haritada değil (listeden haritaya sürükle)';
-    const p = paraParcala(k.para);
-    for (const [ad, deger] of [['altin', p.altin], ['gumus', p.gumus], ['bakir', p.bakir]]) {
+    for (const [ad] of SIKKELER) {
       const girdi = $(`#kd-para-${ad}`);
-      if (document.activeElement !== girdi) girdi.value = String(deger);
+      if (document.activeElement !== girdi) girdi.value = String(k.para?.[ad] ?? 0);
     }
     $('#kd-npc').hidden = !k.npc;
     if (k.npc) {
@@ -503,6 +576,15 @@ export function gmPaneliOlustur({ gonder, harita, gorunumAc }) {
         islem.push(h('button', { class: 'btn btn-sm btn-ghost', type: 'button', onclick: () => gonder({ t: 'haritadan_kaldir', id: k.id }), text: 'Haritadan kaldır' }));
       }
       if (k.npc) {
+        islem.push(
+          h('button', {
+            class: 'btn btn-sm',
+            type: 'button',
+            title: 'Aynı adla; aynı statlar, para, eşyalar ve görünümle yanında bir tane daha',
+            onclick: () => gonder({ t: 'npc_kopyala', id: k.id }),
+            text: 'Kopyala',
+          }),
+        );
         islem.push(
           k.sirada
             ? h('button', { class: 'btn btn-sm', type: 'button', onclick: () => gonder({ t: 'siradan_cikar', id: k.id }), text: 'Sıradan çıkar' })
@@ -587,11 +669,11 @@ export function gmPaneliOlustur({ gonder, harita, gorunumAc }) {
     if (sonuc) gonder({ t: 'takas_baslat', yapan: npc.id, hedef: sonuc.hedef });
   }
 
-  /* Para: altın, gümüş, bakır girdilerinden bakır toplamı */
-  for (const ad of ['altin', 'gumus', 'bakir']) {
-    $(`#kd-para-${ad}`).addEventListener('change', () => {
+  /* Para: her sikke ayrı; biri ötekine çevrilmez */
+  for (const [ad] of SIKKELER) {
+    $(`#kd-para-${ad}`).addEventListener('change', (e) => {
       if (!secili) return;
-      gonder({ t: 'karakter_guncelle', id: secili, para: paraBirlestir($('#kd-para-altin').value, $('#kd-para-gumus').value, $('#kd-para-bakir').value) });
+      gonder({ t: 'karakter_guncelle', id: secili, [ad]: sikkeSayisi(e.target.value) });
     });
   }
 
@@ -777,10 +859,12 @@ export function gmPaneliOlustur({ gonder, harita, gorunumAc }) {
     const kim = karakter(ist.kim);
     const ad = kim?.ad || '?';
     let govde;
+    let yolYok = false;
     if (ist.tur === 'hareket') {
       const ayar = harita.istekHedefi(ist.id);
-      const hedef = ayar || { x: ist.x2, y: ist.y2 };
-      const mesafe = kim ? `${sayiYaz(Math.hypot(hedef.x - kim.x, hedef.y - kim.y))} kare · ` : '';
+      const L = harita.istekUzunlugu(ist);
+      yolYok = L === null && Boolean(kim?.burada);
+      const mesafe = L !== null ? `${sayiYaz(L)} kare yol · ` : yolYok ? 'oraya yol yok · ' : '';
       govde = [
         h('p', { class: 'req-what' }, h('b', { text: ad }), ' yürümek istiyor'),
         h('p', { class: 'req-meta', text: `${mesafe}${ayar ? 'hedefi sen kaydırdın' : 'hedefi haritada sürükleyerek kaydırabilirsin'}` }),
@@ -818,7 +902,7 @@ export function gmPaneliOlustur({ gonder, harita, gorunumAc }) {
           { class: 'req-actions' },
           h('button', { class: 'btn btn-sm btn-ghost', type: 'button', onclick: () => haritasinaGit(kim), text: kim && !kim.burada ? 'Haritasına git' : 'Göster' }),
           h('button', { class: 'btn btn-sm', type: 'button', onclick: reddet, text: 'Reddet' }),
-          h('button', { class: `btn btn-sm ${ist.tur === 'hareket' ? 'btn-primary' : 'btn-danger-solid'}`, type: 'button', onclick: onayla, text: 'Onayla' }),
+          h('button', { class: `btn btn-sm ${ist.tur === 'hareket' ? 'btn-primary' : 'btn-danger-solid'}`, type: 'button', disabled: yolYok, title: yolYok ? 'Bu hedefe yol yok; hedefi kaydır ya da reddet' : null, onclick: onayla, text: 'Onayla' }),
         ),
       ),
     );
@@ -919,6 +1003,7 @@ export function gmPaneliOlustur({ gonder, harita, gorunumAc }) {
       $('#harita-gizli').disabled = !durum.harita;
       $('#harita-kapat').disabled = !durum.harita;
       izgaraCiz();
+      duvarlarCiz();
       siraCiz();
       if (bekleyenNpc && karakter(bekleyenNpc)) {
         secili = bekleyenNpc;
@@ -947,6 +1032,11 @@ export function gmPaneliOlustur({ gonder, harita, gorunumAc }) {
     },
     yerEsyasiTiklandi,
     portalTiklandi: (id) => portalDuzenle(id),
+    duvarEklendi(id) {
+      geriAlinacak.push(id);
+      if (geriAlinacak.length > 500) geriAlinacak.shift();
+      if (durum) duvarlarCiz();
+    },
     portalEklendi(id) {
       bekleyenPortal = id;
       if (harita.portal(id)) {

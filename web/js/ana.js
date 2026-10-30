@@ -1,4 +1,4 @@
-import { $, h, istek, bildir, dosyaAdi, paraYaz } from './ortak.js';
+import { $, h, istek, bildir, dosyaAdi, paraYaz, paraVar } from './ortak.js';
 import { haritaOlustur } from './harita.js';
 import { kayitOlustur } from './kayit.js';
 import { turKartiOlustur, durumKartiCiz } from './tur.js';
@@ -8,12 +8,14 @@ import { zarSimgesi } from './zar-sekilleri.js';
 import { gorunumPenceresi } from './gorunum.js';
 import { takasOlustur } from './takas.js';
 import { ses, sesAcik, sesAyarla } from './ses.js';
+import { SURUM, bellegiDenetle, surumTuttu, yeniSurumeGec } from './surum.js';
 
 // /gm GM ekranını, kök adres oyuncu ekranını açar.
 const rol = location.pathname.replace(/\/+$/, '') === '/gm' ? 'gm' : 'oyuncu';
 const dar = window.matchMedia('(max-width: 900px)');
 
 let bilgi = { oyun_adi: 'Roleplay', sifre_var: true };
+const surumSorgusu = `surum=${encodeURIComponent(SURUM)}`;
 let ws = null;
 let durum = null;
 let cikildi = false;
@@ -87,9 +89,9 @@ $('#giris-formu').addEventListener('submit', async (e) => {
   hata.textContent = '';
   try {
     if (gmMi) {
-      await istek('/api/gm-giris', { yontem: 'POST', govde: { sifre } });
+      await istek('/api/gm-giris', { yontem: 'POST', govde: { sifre, surum: SURUM } });
     } else {
-      await istek('/api/giris', { yontem: 'POST', govde: { ad, sifre } });
+      await istek('/api/giris', { yontem: 'POST', govde: { ad, sifre, surum: SURUM } });
       try {
         localStorage.setItem('roleplay.ad', ad);
       } catch {
@@ -100,6 +102,7 @@ $('#giris-formu').addEventListener('submit', async (e) => {
     cikildi = false;
     baglan();
   } catch (err) {
+    if (err.durum === 409 && err.veri?.surum && (await surumDegisti(err.veri.surum))) return;
     hata.textContent = err.message;
     $('#giris-sifre').select();
   } finally {
@@ -121,6 +124,16 @@ async function cikis() {
 
 // ------------------------------------------------------------ bağlantı
 
+/* Sunucu bu sayfadan başka bir sürüme geçmiş (güncellendi): bellek silinir, sayfa yenilenir. Yenileme bu sürümü
+   getirmediyse (ör. arada bir önbellek varsa) elle yenilemesi istenir. */
+async function surumDegisti(yeni) {
+  if (await yeniSurumeGec(yeni)) return true;
+  cikildi = true;
+  ws?.close();
+  baglantiDurumu('Oyun güncellendi. Sayfayı yenile (Ctrl+Shift+R).');
+  return true;
+}
+
 function baglantiDurumu(metin) {
   const el = $('#baglanti');
   el.textContent = metin;
@@ -131,7 +144,7 @@ function baglan() {
   if (!harita) kur();
   ws?.close();
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const soket = new WebSocket(`${proto}://${location.host}/ws?rol=${rol}`);
+  const soket = new WebSocket(`${proto}://${location.host}/ws?rol=${rol}&${surumSorgusu}`);
   ws = soket;
   soket.onopen = () => {
     bekleme = 1000;
@@ -157,10 +170,12 @@ function baglan() {
 async function yenidenDene() {
   if (cikildi) return;
   try {
-    await istek(`/api/oturum?rol=${rol}`);
+    await istek(`/api/oturum?rol=${rol}&${surumSorgusu}`);
     baglan();
   } catch (e) {
-    if (e.durum === 401) {
+    if (e.durum === 409) {
+      surumDegisti(e.veri?.surum);
+    } else if (e.durum === 401) {
       baglantiDurumu('');
       girisGoster(rol === 'gm' ? 'GM oturumun kapandı; GM şifresiyle yeniden gir.' : 'Oturumun kapandı; oyun şifresi değişmiş olabilir. Yeniden gir.');
     } else {
@@ -224,10 +239,10 @@ function ganimetGoster(m) {
     ses.para();
     gonder({ t: 'ganimet_al', hedef: m.hedef, ...ek });
   };
-  const bos = !m.envanter.length && !(m.para > 0);
+  const bos = !m.envanter.length && !paraVar(m.para);
   kap.replaceChildren(
     ...[
-      m.para > 0
+      paraVar(m.para)
         ? h('div', { class: 'loot-coins' }, h('span', { class: 'coin-icon', 'aria-hidden': 'true', text: '◉' }), h('span', { text: paraYaz(m.para) }), h('button', { class: 'btn btn-sm', type: 'button', onclick: () => al({ para: true }), text: 'Parayı al' }))
         : null,
       m.envanter.length
@@ -290,6 +305,7 @@ function kur() {
     dunya: $('#dunya'),
     resim: $('#harita-resim'),
     izgara: $('#izgara'),
+    duvarKatmani: $('#duvar-katmani'),
     portalKatmani: $('#portallar'),
     yerKatmani: $('#yerdekiler'),
     tokenKatmani: $('#tokenler'),
@@ -301,6 +317,9 @@ function kur() {
     yakinlik: $('#yakinlik'),
   });
   harita.on('yuru', (x, y) => gonder({ t: 'hareket', x, y }));
+  harita.on('yolYok', () => bildir('Oraya gidecek bir yol yok.'));
+  harita.on('duvarEkle', (x1, y1, x2, y2) => gonder({ t: 'duvar_ekle', x1, y1, x2, y2 }));
+  harita.on('duvarSil', (id) => gonder({ t: 'duvar_sil', id }));
   harita.on('tasi', (id, x, y) => gonder({ t: 'tasi', id, x, y }));
   harita.on('isaret', (x, y, odak) => gonder({ t: 'isaret', x, y, odak }));
   harita.on('sec', (id) => gm?.secimDegisti(id));
@@ -327,7 +346,7 @@ function kur() {
   });
 
   kayit = kayitOlustur($('#kayit'));
-  tur = turKartiOlustur($('#tur-karti'), { gonder });
+  tur = turKartiOlustur($('#tur-karti'), { gonder, yolUzunlugu: (ist) => harita.istekUzunlugu(ist) });
 
   // Zar tepsisi
   const tepsi = $('#zarlar');
@@ -565,6 +584,9 @@ function mesaj(m) {
     case 'npc_eklendi':
       gm?.npcEklendi(m.id);
       break;
+    case 'duvar_eklendi':
+      gm?.duvarEklendi(m.id);
+      break;
     default:
       break;
   }
@@ -583,18 +605,32 @@ document.addEventListener(
 );
 
 async function basla() {
+  /* Bellekte başka bir sürümün kalıntısı varsa önce silinir */
+  await bellegiDenetle();
   try {
     bilgi = await istek('/api/bilgi');
   } catch {
     /* sunucuya ulaşılamazsa bağlanırken tekrar denenecek */
   }
+  if (bilgi.surum && bilgi.surum !== SURUM) {
+    /* Sayfa yüklenirken sunucu güncellendi */
+    await surumDegisti(bilgi.surum);
+    return;
+  }
+  if (bilgi.surum) surumTuttu();
   document.title = bilgi.oyun_adi;
   try {
-    await istek(`/api/oturum?rol=${rol}`);
+    await istek(`/api/oturum?rol=${rol}&${surumSorgusu}`);
     baglan();
-  } catch {
-    girisGoster();
+  } catch (e) {
+    if (e.durum === 409) surumDegisti(e.veri?.surum);
+    else girisGoster();
   }
 }
+
+/* Geri/ileri ile bellekten (bfcache) dönen sayfa eski kalmış olabilir: yeniden yüklenir */
+window.addEventListener('pageshow', (e) => {
+  if (e.persisted) location.reload();
+});
 
 basla();

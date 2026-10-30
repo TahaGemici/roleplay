@@ -5,11 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#241a14">
+  <!-- Sunucu, sürümün yer tutucusuna kendi sürümünü yazar: her sürümün dosyaları ayrı adreste durur -->
+  <meta name="roleplay-surum" content="%SURUM%">
   <title>Roleplay</title>
-  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/yazitipleri.css">
-  <link rel="stylesheet" href="/stil.css">
-  <script type="module" src="/js/ana.js"></script>
+  <link rel="icon" href="/s/%SURUM%/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/s/%SURUM%/yazitipleri.css">
+  <link rel="stylesheet" href="/s/%SURUM%/stil.css">
+  <script type="module" src="/s/%SURUM%/js/ana.js"></script>
 </head>
 <body>
   <div class="boot felt" id="boot"></div>
@@ -67,10 +69,25 @@
             <button class="btn" id="harita-kapat" type="button">Haritayı kapat</button>
           </div>
           <label class="check"><input type="checkbox" id="harita-gizli"> Haritayı oyunculardan gizle</label>
+          <div class="sub-sec" id="duvar-ayar">
+            <h3 class="sub-title">Duvarlar</h3>
+            <p class="hint">Duvarın üstünden geçilmez: yürüyüş duvarın etrafından dolaşır. Görüş sisi açıkken duvarın arkası da görülmez. "Duvar çiz"e bas, haritada köşeden köşeye tıkla. Çizgiyi bitirmek için son noktaya bir daha tıkla, çift tıkla, sağ tıkla ya da Esc'e bas. Shift basılıyken yapışmaz. Kapı açmak için o duvarı sil, kapatmak için yeniden çiz.</p>
+            <div class="row-2">
+              <button class="btn" id="duvar-ciz" type="button" aria-pressed="false">Duvar çiz</button>
+              <button class="btn" id="duvar-sil" type="button" aria-pressed="false">Duvar sil</button>
+            </div>
+            <div class="row-2">
+              <button class="btn btn-sm" id="duvar-geri" type="button" title="Ctrl+Z">Son duvarı geri al</button>
+              <button class="btn btn-sm btn-danger" id="duvar-temizle" type="button">Hepsini sil</button>
+            </div>
+            <label class="check"><input type="checkbox" id="duvar-izgara" checked> Izgaranın köşelerine yapış</label>
+            <label class="check"><input type="checkbox" id="duvar-goster" checked> Duvarları göster (yalnızca sen)</label>
+            <p class="hint" id="duvar-sayi"></p>
+          </div>
           <div class="sub-sec" id="gorus-ayar">
             <h3 class="sub-title">Görüş</h3>
             <label class="check"><input type="checkbox" id="iz-sis"> Görüş sisi</label>
-            <p class="hint">Açıkken her oyuncu yalnızca görüş menzilindekini görür. Daha önce gördüğü yerler eski haliyle, karartılmış durur; oradaki değişikliği görmez. Görüş menzili herkes için aynıdır; Ayarlar'dan değiştirilir.</p>
+            <p class="hint">Açıkken her oyuncu yalnızca görüş menzilindekini görür; duvarların arkasını göremez. Daha önce gördüğü yerler eski haliyle, karartılmış durur; oradaki değişikliği görmez. Görüş menzili herkes için aynıdır; Ayarlar'dan değiştirilir. Kapalıyken oyuncular haritanın tamamını görür.</p>
             <label class="check"><input type="checkbox" id="halkalar"> Oyuncuların görüş halkalarını göster (yalnızca sen)</label>
             <button class="btn btn-sm btn-danger" id="kesif-sifirla" type="button">Bu haritada keşfi sıfırla</button>
           </div>
@@ -144,7 +161,7 @@
             <div class="stat-edit" id="kd-statlar"></div>
             <p class="hint">Ağırlık (70 + eşyaların ağırlığı): <b id="kd-agirlik"></b></p>
             <div class="field">
-              <span class="field-label">Para</span>
+              <span class="field-label">Para (birbirine çevrilmez)</span>
               <div class="coins">
                 <label class="coin"><input class="input" id="kd-para-altin" type="number" min="0" step="1" inputmode="numeric"><span>altın</span></label>
                 <label class="coin"><input class="input" id="kd-para-gumus" type="number" min="0" step="1" inputmode="numeric"><span>gümüş</span></label>
@@ -208,6 +225,7 @@
         <div class="world" id="dunya" hidden>
           <img class="map-img" id="harita-resim" alt="" draggable="false" decoding="async">
           <div class="grid" id="izgara" hidden></div>
+          <svg class="walls" id="duvar-katmani" aria-hidden="true"></svg>
           <div class="portals" id="portallar"></div>
           <div class="ground" id="yerdekiler"></div>
           <div class="tokens" id="tokenler"></div>

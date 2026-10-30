@@ -17,13 +17,15 @@
  *   o->can, o->odak, o->zirh, o->buyu_direnci
  *   o->enerji                   aksiyon puanı; 0 olunca sıra geçer (ne kadar harcanacağını sen yazarsın)
  *   o->agirlik                  ağırlığı: KARAKTER_AGIRLIGI (70) + eşyalarının ağırlıkları (salt okunur)
- *   o->para                     parası, bakır cinsinden (1 ALTIN = 50 GUMUS = 200 BAKIR)
+ *   o->altin, o->gumus, o->bakir parası: üç ayrı sikke, birbirine çevrilmez
  *   o->envanter[i]              eşyalar: .ad, .sinif, .resim, .agirlik, .dayaniklilik  (i < o->envanter_adet;
  *                               envanter[0] her zaman yumruk, en fazla ENVANTER_AZAMI eşya)
  *   o->npc                      1 ise GM'in karakteri
  *
  *   harita.genislik, harita.yukseklik   açık haritanın boyutu (kare; GM haritayı açarken seçer)
  *   tur_sayisi                          kaçıncı tur
+ *   yol_uzunlugu                        hareket() içinde: yürünecek yolun uzunluğu (duvarların etrafından)
+ *   yol_noktasi(u, &x, &y)              hareket() içinde: yolun u kadar ilerisindeki nokta
  *
  *   zar_at(2, 6)          2d6 atar, toplamı döner (sonucu GM ve o işteki oyuncular kayıtta görür)
  *   zar("1d20+5")         ifadeyle zar atar (aynı şekilde kayda yazılır)
@@ -79,7 +81,8 @@ void her_tur(Oyuncu *o)
 
 /* ------------------------------------------------------------------ GM bir yürüyüşü onaylayınca
  *
- * o->x, o->y oyuncunun şu anki yeri; x, y gitmek istediği yer (kare cinsinden).
+ * o->x, o->y oyuncunun şu anki yeri; x, y gitmek istediği yer (kare cinsinden). Arada duvar varsa karakter
+ * duvarın etrafından dolaşır; yürüyeceği yolun uzunluğu yol_uzunlugu'dur.
  * Enerjiyi burada sen düşürürsün; sunucu yürüyüş için kendiliğinden enerji harcamaz.
  *
  *   return 1;                           oyuncu x, y'ye yürür
@@ -91,7 +94,7 @@ void her_tur(Oyuncu *o)
  */
 int hareket(Oyuncu *o, float x, float y)
 {
-    float mesafe = hypotf(x - o->x, y - o->y);  /* düz çizgi uzunluğu, kare cinsinden */
+    float mesafe = yol_uzunlugu;                 /* yürünecek yolun uzunluğu (duvarların etrafından), kare cinsinden */
     float bedel = (mesafe > 4.0) ? (mesafe - 4.0) : 0.0;    /* kare başına 1 enerji */
 
     if (bedel > o->enerji) {

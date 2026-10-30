@@ -40,7 +40,7 @@ int hareket(Oyuncu *o, float x, float y)
         o->enerji -= 1;
         return 1;
     }
-    float d = hypotf(x - o->x, y - o->y);
+    float d = yol_uzunlugu;
     if (d > o->enerji) {
         bildir(o, "YETMEZ: %.1f > %.1f", d, o->enerji);
         return 0;

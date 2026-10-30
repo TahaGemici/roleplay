@@ -80,7 +80,11 @@ jobs:
         run: |
           curl -fsS http://127.0.0.1:3000/saglik && echo
           curl -fsS http://127.0.0.1:3000/ | grep -qi '<html'
-          curl -fsS -o /dev/null -H 'Content-Type: application/json' -d '{"sifre":"ci-gm-sifresi-123"}' http://127.0.0.1:3000/api/gm-giris
+          # Giriş, sayfanın sürümünü ister (sürüm tutmayan eski sayfalar yenilensin diye)
+          SUNUCU_SURUMU=$(curl -fsS http://127.0.0.1:3000/api/bilgi | sed -n 's/.*"surum":"\([^"]*\)".*/\1/p')
+          test -n "$SUNUCU_SURUMU"
+          curl -fsS http://127.0.0.1:3000/ | grep -q "/s/$SUNUCU_SURUMU/js/ana.js"
+          curl -fsS -o /dev/null -H 'Content-Type: application/json' -d "{\"sifre\":\"ci-gm-sifresi-123\",\"surum\":\"$SUNUCU_SURUMU\"}" http://127.0.0.1:3000/api/gm-giris
           machinectl list --no-pager || true
           # Konteynerin root'u sunucuda ayrıcalıksız UID 1514995712'dir; program onunla çalışmalı
           ps -o uid=,args= -C roleplay | tee ps.log

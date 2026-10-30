@@ -1,4 +1,4 @@
-import { $, h, paraYaz, paraParcala, paraBirlestir, sayiYaz } from './ortak.js';
+import { $, h, paraYaz, paraVar, sikkeSayisi, SIKKELER, sayiYaz } from './ortak.js';
 import { grupla, esyaKarti } from './envanter.js';
 import { ses } from './ses.js';
 
@@ -60,7 +60,7 @@ export function takasOlustur({ gonder }) {
   function benimYuva(i, yuva, gruplar) {
     const sec = h('select', { class: 'input', 'aria-label': `${i + 1}. yuva` });
     sec.append(h('option', { value: '', text: '— boş —' }));
-    if (takas.kendim.para > 0) sec.append(h('option', { value: 'para', text: `Para (${paraYaz(takas.kendim.para)})` }));
+    if (paraVar(takas.kendim.para)) sec.append(h('option', { value: 'para', text: `Para (${paraYaz(takas.kendim.para)})` }));
     gruplar.forEach((g, n) => {
       const e = g.esya;
       sec.append(h('option', { value: `e${n}`, text: `${e.ad}${g.adet > 1 ? ` ×${g.adet}` : ''} · day. ${sayiYaz(e.dayaniklilik)}` }));
@@ -68,13 +68,15 @@ export function takasOlustur({ gonder }) {
     const ek = h('div', { class: 'trade-extra' });
     if (yuva?.tur === 'para') {
       sec.value = 'para';
-      const p = paraParcala(yuva.para);
-      const alan = (ad, deger) => h('label', { class: 'coin' }, h('input', { class: 'input', type: 'number', min: '0', step: '1', inputmode: 'numeric', value: String(deger), dataset: { para: ad } }), h('span', { text: ad }));
-      ek.append(alan('altın', p.altin), alan('gümüş', p.gumus), alan('bakır', p.bakir));
+      /* Her sikke ayrı: elindekinden fazlası konamaz */
+      const elde = takas.kendim.para || {};
+      const alan = (k, ad) =>
+        h('label', { class: 'coin' }, h('input', { class: 'input', type: 'number', min: '0', max: String(elde[k] || 0), step: '1', inputmode: 'numeric', value: String(yuva.para?.[k] || 0), dataset: { para: k } }), h('span', { text: ad }));
+      ek.append(...SIKKELER.map(([k, ad]) => alan(k, ad)));
       ek.addEventListener('change', () => {
-        const [a, g, b] = [...ek.querySelectorAll('input')].map((x) => x.value);
-        const toplam = paraBirlestir(a, g, b);
-        teklifGonder(teklif(i, toplam > 0 ? { tur: 'para', para: toplam } : null));
+        const para = {};
+        for (const g of ek.querySelectorAll('input')) para[g.dataset.para] = Math.min(sikkeSayisi(g.value), elde[g.dataset.para] || 0);
+        teklifGonder(teklif(i, paraVar(para) ? { tur: 'para', para } : null));
       });
     } else if (yuva?.tur === 'esya') {
       const n = gruplar.findIndex((g) => ayni(g.esya, yuva.esya));
@@ -87,7 +89,11 @@ export function takasOlustur({ gonder }) {
     }
     sec.addEventListener('change', () => {
       if (!sec.value) return teklifGonder(teklif(i, null));
-      if (sec.value === 'para') return teklifGonder(teklif(i, { tur: 'para', para: Math.min(takas.kendim.para, 1) }));
+      if (sec.value === 'para') {
+        /* Elindeki ilk sikkeden bir tane */
+        const [k] = SIKKELER.find(([s]) => takas.kendim.para?.[s] > 0) || ['bakir'];
+        return teklifGonder(teklif(i, { tur: 'para', para: { altin: 0, gumus: 0, bakir: 0, [k]: 1 } }));
+      }
       const g = gruplar[Number(sec.value.slice(1))];
       teklifGonder(teklif(i, { tur: 'esya', esya: tur(g.esya), adet: 1 }));
     });

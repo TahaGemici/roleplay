@@ -282,6 +282,34 @@ void base64_kodla(const unsigned char *in, size_t n, char *out)
     out[j] = '\0';
 }
 
+long long base64_coz(const char *in, unsigned char **out)
+{
+    size_t n = strlen(in);
+    unsigned char *b = xmalloc(n / 4 * 3 + 3);
+    size_t j = 0;
+    uint32_t v = 0;
+    int bit = 0;
+    for (size_t i = 0; i < n; i++) {
+        char c = in[i];
+        int d = c >= 'A' && c <= 'Z' ? c - 'A' : c >= 'a' && c <= 'z' ? c - 'a' + 26 : c >= '0' && c <= '9' ? c - '0' + 52
+              : c == '+' ? 62 : c == '/' ? 63 : c == '=' ? -2 : -1;
+        if (d == -2) break;
+        if (d < 0) {
+            free(b);
+            *out = NULL;
+            return -1;
+        }
+        v = (v << 6) | (uint32_t)d;
+        bit += 6;
+        if (bit >= 8) {
+            bit -= 8;
+            b[j++] = (unsigned char)(v >> bit);
+        }
+    }
+    *out = b;
+    return (long long)j;
+}
+
 /* ------------------------------------------------------------------ UTF-8 */
 
 int utf8_gecerli(const char *s, size_t n)

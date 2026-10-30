@@ -3,10 +3,11 @@
 Kendi sunucunda çalışan, Fallout 1 gibi sıra tabanlı bir sanal oyun masası. Oyuncular sesli konuşur; ekranda harita, tur sırası, zarlar, statlar ve envanter durur.
 
 - **GM ekranı:** `https://alanadin/gm`, GM şifresiyle girilir. GM her şeyi görür ve yönetir.
-- **Oyuncu ekranı:** `https://alanadin/`, isim ve oyun şifresiyle girilir. Oyuncu yalnızca kendi statlarını ve görüş menzilindekini görür; haritanın nerede bittiğini bilmez.
+- **Oyuncu ekranı:** `https://alanadin/`, isim ve oyun şifresiyle girilir. Oyuncu yalnızca kendi statlarını ve görüş menzilindekini görür; duvarların arkasını görmez, haritanın nerede bittiğini bilmez.
 - **Sıra tabanlı:** Sırası gelen oyuncu haritaya tıklayıp yürür; bir karaktere tıklayıp saldırır ya da büyü yapar. Hepsi GM'in onayına gider.
+- **Duvarlar:** GM haritanın üstüne duvar çizer. Duvarın üstünden geçilmez, görüş sisi açıkken arkası görülmez. Yürüyüş duvarların etrafından dolaşan en kısa yoldan gider; yol haritada çizilir.
 - **Birden çok harita:** Oyuncular farklı haritalarda olabilir; aralarında GM'in koyduğu portallarla geçerler.
-- **Ekonomi:** Bakır, gümüş, altın para; eşya takası, ölünün üstünü arama, her eşyada dayanıklılık.
+- **Ekonomi:** Altın, gümüş ve bakır ayrı ayrı sayılır, birbirine çevrilmez; eşya takası, ölünün üstünü arama, her eşyada dayanıklılık.
 - **Sesli:** Her görsel efektin (yürüme, saldırı, büyü, ölüm, portal, zar...) bir sesi vardır; üst çubuktaki 🔊 ile kapanır.
 - **Kurallar senin:** Enerji, hareket, saldırı ve büyü kurallarını `sunucu/kurallar.c` içinde C ile yazarsın.
 - Sunucu C ile, arayüz düz HTML/CSS/JS ile yazıldı; bağımlılık yok.
@@ -59,6 +60,8 @@ nginx kullanıyorsan `kurulum/nginx.conf`'a bak.
 | Günlük | `journalctl -u systemd-nspawn@roleplay -f` |
 | `.env` değişince (oyun kalır) | `sudo systemctl restart systemd-nspawn@roleplay` |
 
+Güncellemeden sonra açık GM ve oyuncu sayfaları kendini yeniler. Tarayıcı oyunun sürümünü kendi belleğinde tutar; sürüm değişmişse eski bellek (yerel depolama ve önbellek) kendiliğinden silinir, kimsenin elle temizlemesi gerekmez.
+
 Depo özelse sürümler herkese açık olmaz. Bu durumda sunucuda `gh auth login` ile giriş yapıp şunu çalıştır:
 
 ```bash
@@ -70,7 +73,7 @@ gh release download -R TahaGemici/roleplay -p roleplay.raw -p kur.sh --clobber &
 Sunucu dört fonksiyonunu çağırır:
 
 - `her_tur(o)`: bir karakterin sırası başlarken. `o->enerji` önce GM'in ayarladığı değere doldurulur.
-- `hareket(o, x, y)`: GM bir yürüyüşü onaylayınca. `1` döndürürsen karakter yürür, `0` döndürürsen yerinde kalır. Enerjiyi sen düşürürsün.
+- `hareket(o, x, y)`: GM bir yürüyüşü onaylayınca. `1` döndürürsen karakter yürür, `0` döndürürsen yerinde kalır. Enerjiyi sen düşürürsün. Arada duvar varsa karakter duvarların etrafından dolaşır; yürüyeceği yolun uzunluğu `yol_uzunlugu`'dur.
 - `saldiri(saldiran, hedef, esya)`: GM bir saldırıyı onaylayınca.
 - `buyu(yapan, hedef, buyu_adi)`: GM bir büyüyü onaylayınca. Hedef, yapanın kendisi de olabilir.
 
@@ -96,7 +99,7 @@ void her_tur(Oyuncu *o)
 int hareket(Oyuncu *o, float x, float y)
 {
     float yuk = o->agirlik - KARAKTER_AGIRLIGI;                 /* taşıdığı eşyaların ağırlığı */
-    float bedel = hypotf(x - o->x, y - o->y) + yuk / 10;        /* yük yürümeyi zorlaştırır */
+    float bedel = yol_uzunlugu + yuk / 10;                       /* yolun uzunluğu; yük yürümeyi zorlaştırır */
     if (bedel > o->enerji) {
         bildir(o, "Enerjin yetmiyor.");
         return 0;
@@ -131,14 +134,16 @@ void buyu(Oyuncu *yapan, Oyuncu *hedef, const char *buyu_adi)
 
 **Kullanabileceklerin** (`sunucu/kurallar.h`):
 
-- Karakter: `ad`, `x`, `y`, `can`, `odak`, `zirh`, `buyu_direnci`, `enerji`, `agirlik` (70 + eşyalarının ağırlığı, salt okunur; 70 = `KARAKTER_AGIRLIGI`), `para`, `envanter[]` / `envanter_adet`, `npc`
+- Karakter: `ad`, `x`, `y`, `can`, `odak`, `zirh`, `buyu_direnci`, `enerji`, `agirlik` (70 + eşyalarının ağırlığı, salt okunur; 70 = `KARAKTER_AGIRLIGI`), `altin`, `gumus`, `bakir`, `envanter[]` / `envanter_adet`, `npc`
 - Eşya: `ad`, `sinif`, `resim`, `agirlik`, `dayaniklilik` (yeni eşyada 100), `sabit` (yumrukta 1)
-- Para bakır cinsindendir: `o->para += 2 * ALTIN + 5 * GUMUS;` (1 altın = 50 gümüş = 200 bakır)
+- Para üç ayrı sikkedir, birbirine çevrilmez: `o->altin += 2; o->gumus += 5;` (hiçbiri 0'ın altına inmez)
 - Dayanıklılığa sunucu hiç dokunmaz: azaltmak, 0'a inince eşyayı kırmak (`envanter_cikar`) senin işin.
 - `zar("2d6+3")`, `zar_at(2, 6)`: zar atar. Sonucu GM ve o işteki oyuncular (yapan ve hedef) kayıtta görür.
 - `duyur(...)`: herkese, `bildir(o, ...)`: o oyuncuya ve GM'e, `gm_bildir(...)`: yalnızca GM'e yazar
 - `envanter_ekle(o, ad, sinif, resim)`, `envanter_cikar(o, sira)`: envanterde en fazla `ENVANTER_AZAMI` (12) eşya olur; `envanter[0]` her zaman yumruktur ve çıkarılamaz.
 - `harita.genislik`, `harita.yukseklik`, `tur_sayisi`
+- `hareket()` içinde: `yol_uzunlugu` (duvarların etrafından dolaşan yolun uzunluğu, kare) ve `yol_noktasi(u, &x, &y)` (yolun `u` kadar ilerisindeki nokta). Enerjinin yettiği yere kadar yürütmek için: `yol_noktasi(o->enerji, &o->x, &o->y); return 1;`
+- `o->x`, `o->y`'yi başka bir fonksiyonda değiştirirsen karakter oraya düz çizgide itilir; arada duvar varsa duvarın önünde durur.
 
 Fonksiyonlar hızlı bitmeli; çalışırken sunucu bekler. Değişiklikten sonra `make test` ile dene, `main`'e push'la ve sunucuda kurulum komutunu çalıştır.
 
@@ -146,18 +151,21 @@ Fonksiyonlar hızlı bitmeli; çalışırken sunucu bekler. Değişiklikten sonr
 
 **GM:**
 
-- Harita yükler ve açar; ilk açışta kaç kare olduğunu seçer. Başka bir haritaya bakmak kimseyi taşımaz: her oyuncu kendi haritasında kalır.
+- Harita yükler ve açar; ilk açışta kaç kare olduğunu seçer. Başka bir haritaya bakmak kimseyi taşımaz: her oyuncu kendi haritasında kalır. Boyutu sonradan değiştirirse duvarlar, pullar, eşyalar ve portallar resmin üstünde yerinde kalır.
+- Haritayı açınca "Duvarlar" bölümünden duvarları çizer: "Duvar çiz"e basıp köşeden köşeye tıklar (uçlara ve ızgara köşelerine yapışır, Shift basılıyken yapışmaz). Son noktaya bir daha tıklamak, çift tıklamak, sağ tıklamak ya da Esc çizgiyi bitirir; Ctrl+Z son duvarı geri alır, "Duvar sil" tıklanan duvarı siler. Kapı yoktur: kapıyı açmak için o duvarı siler, kapatmak için yeniden çizer. Duvarları yalnızca GM görür; oyuncular haritanın resmindeki duvarları görür.
+- Bir pulu sürükleyince pul duvarların etrafından yürür; oraya yol yoksa (kapalı oda, duvarın öbür yanı) ışınlanır.
 - Oyuncular girince kendiliğinden haritaya konmaz. GM onları soldaki listeden baktığı haritaya sürükleyip bırakarak yerleştirir (başka haritadakini de buraya getirir); haritada olmayan oyuncunun sırası geçilir. Liste, karakterleri haritalarına göre gruplar; "Haritasına git" o karakterin haritasını açar.
 - Portalı "Portallar" bölümünden haritaya sürükler, sonra hedef haritayı ve nereye çıkılacağını seçer. Yürüyüşü portalda biten oyuncu o haritaya geçer. Oyuncular portalı görür ama nereye çıktığını bilmez.
 - Eşyaları katalogdan haritaya sürükler. Bir karakterin üstüne bırakılan eşya onun envanterine gider; boş yere bırakılan yerde durur.
-- NPC'leri yönetir: statlarını, parasını, envanterini düzenler; bir NPC adına oyuncuyla takas yapar ("Takas…").
+- NPC'leri yönetir: statlarını, parasını, envanterini düzenler; bir NPC adına oyuncuyla takas yapar ("Takas…"). "Kopyala" seçili NPC'nin aynısını (adı, statları, parası, envanteri, görünümü aynı) yanına koyar; asıl NPC sıradaysa kopyası hemen arkasına girer.
 - Tur sırasını kurar, "Turları başlat"a basar; yürüme, saldırı ve büyü isteklerini onaylar ya da reddeder.
 - Karakterlerin statlarını, paralarını, eşyalarının ağırlığını ve dayanıklılığını, görünümünü (resim ve şapka) ve oyun klasöründeki dosyaları GM ekranından yönetir.
 - Görüş menzilini Ayarlar'dan herkes için tek bir değer olarak belirler. Yeni bir maç için "Maçı sıfırla"ya basar.
 
 **Oyuncu:**
 
-- Sırası gelince haritaya tıklayıp yürür. Yolu üstündeki ya da yürüyüşünün bittiği yerdeki eşyayı, envanteri dolu değilse alır.
+- Sırası gelince haritaya tıklayıp yürür. Arada duvar varsa yol duvarların etrafından dolaşır; tıklamadan önce yol ve uzunluğu haritada çizilir. Yolu olmayan yere ("Yol yok") yürünmez. Yolu üstündeki ya da yürüyüşünün bittiği yerdeki eşyayı, envanteri dolu değilse alır.
+- Görüş sisi açıkken duvarların arkasını görmez. Gördüğü yerleri karartılmış olarak hatırlar; başkalarının yürüyüşünün de yalnızca gördüğü kısmını görür.
 - Bir karaktere tıklayınca "Saldır", "Büyü yap" ya da "Takas"ı seçer; kendine tıklayınca kendine büyü yapar. Takas her zaman yapılabilir (sıra beklemez).
 - Takasta iki taraf da en fazla 4 çeşit eşya ya da para koyar; kimse karşısının envanterini görmez, yalnızca ortaya konanları görür. İkisi de onaylayınca takas olur; teklif değişince onaylar düşer.
 - Yanındaki bir ölüye tıklayınca üstünü arar: eşyalarını ve parasını tek tek ya da hepsini birden alır.
@@ -171,7 +179,7 @@ Fonksiyonlar hızlı bitmeli; çalışırken sunucu bekler. Değişiklikten sonr
 
 Oyunun bütün verisi `oyun/` klasöründedir (sunucuda `/var/lib/roleplay/oyun`):
 
-- `durum.json`: karakterler, statlar, paralar, envanterler, konumlar ve haritaları, keşfedilen yerler, hatırlanan eşyalar, yerdeki eşyalar, portallar, tur sırası, kayıt, ayarlar
+- `durum.json`: karakterler, statlar, paralar, envanterler, konumlar ve haritaları, duvarlar, keşfedilen yerler ve görülen duvarlar, hatırlanan eşyalar, yerdeki eşyalar, portallar, tur sırası, kayıt, ayarlar
 - `haritalar/`, `esyalar/`, `tokenlar/` (pul resimleri), `sapkalar/`
 
 Kurulum komutu (güncelleme ve eski sürüme dönüş de) her çalıştığında bu klasörü siler: yeni sürüm eski sürümün kaydını okumaz, boş bir oyunla başlar. `.env` (şifreler ve alan adı) silinmez. Haritaların ve resimlerin aslını kendi bilgisayarında sakla; güncellemeden sonra GM ekranındaki **Dosyalar**'dan yeniden yüklersin. Kendi bilgisayarında çalıştırırken `oyun/` silinmez; sunucu başka bir sürümün `durum.json`'unu okumaz, kenara alıp yeni bir oyunla başlar.
@@ -181,5 +189,5 @@ Aynı sürümde yeni bir maça başlamak için GM ekranındaki **Maçı sıfırl
 ## Sınırlar
 
 - Bir sunucu tek bir oyun çalıştırır.
-- Harita bir resimdir, duvarları bilmez: görüş duvarlardan geçer. Engelleri GM yönetir.
+- Duvarı GM çizer: harita resmindeki duvarları sunucu kendisi tanımaz. Duvar incedir, kapı ve pencere yoktur; karakterler birbirinin içinden geçebilir.
 - Sesler tarayıcıda üretilir; tarayıcı ilk tıklamadan önce ses çalmaz.

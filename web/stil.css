@@ -473,6 +473,21 @@ input[type="checkbox"] {
 .viewport.is-panning {
   cursor: grabbing;
 }
+/* GM duvar çizerken ya da silerken: pullar, eşyalar ve portallar tıklamayı tutmaz */
+.viewport.is-wall-draw,
+.viewport.is-wall-erase {
+  cursor: crosshair;
+}
+.viewport.is-wall-draw .token,
+.viewport.is-wall-erase .token,
+.viewport.is-wall-draw .ground-item,
+.viewport.is-wall-erase .ground-item,
+.viewport.is-wall-draw .portal,
+.viewport.is-wall-erase .portal,
+.viewport.is-wall-draw .ghost,
+.viewport.is-wall-erase .ghost {
+  pointer-events: none !important;
+}
 .viewport:focus-visible {
   box-shadow: inset 0 0 0 2px var(--brass-hi);
 }
@@ -647,6 +662,46 @@ input[type="checkbox"] {
   pointer-events: none;
 }
 
+/* Duvarlar (yalnızca GM görür): haritanın üstünde, pulların altında */
+.walls {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+.wall {
+  stroke: #ff8a3d;
+  stroke-width: calc(4px * var(--inv, 1));
+  stroke-linecap: round;
+  opacity: 0.75;
+  filter: drop-shadow(0 0 calc(2px * var(--inv, 1)) rgba(0, 0, 0, 0.8));
+}
+.walls.is-editing .wall {
+  opacity: 1;
+}
+.wall.is-hover {
+  stroke: #ff3b3b;
+  stroke-width: calc(7px * var(--inv, 1));
+}
+.wall-end {
+  r: calc(4px * var(--inv, 1));
+  fill: #ffd2a8;
+  stroke: #3a1a05;
+  stroke-width: calc(1.5px * var(--inv, 1));
+}
+.overlay .wall-draft {
+  stroke: #ff8a3d;
+  stroke-width: calc(4px * var(--inv, 1));
+  stroke-dasharray: calc(8px * var(--inv, 1)) calc(6px * var(--inv, 1));
+}
+.overlay .wall-snap {
+  r: calc(6px * var(--inv, 1));
+  fill: rgba(255, 138, 61, 0.35);
+  stroke: #ffd2a8;
+  stroke-width: calc(2px * var(--inv, 1));
+}
+
 /* Yollar, hedefler, görüş halkaları (SVG, dünya koordinatlarında) */
 .overlay {
   position: absolute;
@@ -656,11 +711,15 @@ input[type="checkbox"] {
   pointer-events: none;
 }
 .overlay line,
+.overlay polyline,
+.overlay polygon,
 .overlay circle {
   fill: none;
   stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .vision-ring {
+  fill: color-mix(in srgb, var(--rc, var(--bone)) 7%, transparent) !important;
   stroke: var(--rc, var(--bone));
   stroke-width: calc(2px * var(--inv, 1));
   stroke-dasharray: calc(5px * var(--inv, 1)) calc(7px * var(--inv, 1));
@@ -709,6 +768,12 @@ input[type="checkbox"] {
 }
 .ghost.is-request:active {
   cursor: grabbing;
+}
+/* Gidilemeyen hedef */
+.ghost.is-blocked {
+  fill: rgba(240, 90, 70, 0.18) !important;
+  stroke: #f05a46;
+  stroke-dasharray: none;
 }
 @keyframes yol-akisi {
   to {
@@ -761,6 +826,15 @@ input[type="checkbox"] {
 }
 .map-label.is-request .map-label-in {
   border-color: rgba(237, 228, 209, 0.35);
+}
+.map-label.is-blocked .map-label-in {
+  border-color: rgba(240, 90, 70, 0.7);
+  color: #ffb4a8;
+}
+.map-label.is-wall .map-label-in {
+  border-color: rgba(255, 138, 61, 0.6);
+  color: #ffd2a8;
+  transform: translate(-50%, -50%);
 }
 
 /* Token: boyalı tahta pul. Konumu .token'da, saldırı/ölüm hareketleri .token-body'de. */
