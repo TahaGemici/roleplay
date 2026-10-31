@@ -197,7 +197,7 @@ async function etkilesimSec(hedefId) {
   if (durum.olu) return bildir('Öldün; GM seni diriltebilir.');
   if (hedef.olu) return gonder({ t: 'ganimet_bak', hedef: hedefId });
   const s = durum.sira;
-  const engel = !s.aktif ? 'Turlar başlamadı.' : !s.sirada_ben ? 'Sıra sende değil.' : !(durum.statlar.enerji > 0) ? 'Enerjin kalmadı.' : null;
+  const engel = !s.aktif ? 'Turlar başlamadı.' : !s.sirada_ben ? 'Sıra sende değil.' : null;
   if (hedef.ben) return engel ? bildir(engel) : buyuSec(hedef);
   const secenek = (ad, sinif, simge, baslik, alt, kapali) =>
     h(
@@ -264,6 +264,10 @@ function ganimetGoster(m) {
   });
 }
 
+/* Sıranın yürüme aşamasında saldıran ya da büyü yapan bu tur yürümemiş sayılır (sıra önce yürüme, sonra eylem). */
+const yurumediNotu = () =>
+  durum.sira.aktif && durum.sira.sirada_ben && durum.sira.asama !== 'eylem' ? ' Bu tur henüz yürümedin: bunu yaparsan yürümeden geçmiş sayılırsın.' : '';
+
 async function buyuSec(hedef) {
   const liste = durum.buyuler || [];
   if (!liste.length) return bildir('Kurallarda büyü yok (kurallar.c\'deki buyuler listesi boş).');
@@ -271,7 +275,7 @@ async function buyuSec(hedef) {
   const secim = await secimPenceresi({
     baslik: kendim ? 'Kendine büyü yap' : `Büyü: ${hedef.ad}`,
     icerik: (sec) => [
-      h('p', { class: 'modal-text', text: 'Hangi büyüyü yapacaksın? İsteğin GM\'e gider; onaylarsa olur.' }),
+      h('p', { class: 'modal-text', text: `Hangi büyüyü yapacaksın? İsteğin GM'e gider; onaylarsa olur ve turun biter.${yurumediNotu()}` }),
       h('ul', { class: 'spell-list' }, ...liste.map((b) => h('li', {}, h('button', { class: 'spell', type: 'button', onclick: () => sec(b) }, h('span', { class: 'spell-icon', 'aria-hidden': 'true', text: '✦' }), h('span', { text: b }))))),
     ],
   });
@@ -285,7 +289,7 @@ async function saldiriSec(hedef) {
     baslik: `Saldır: ${hedef.ad}`,
     genis: gruplar.length > 4,
     icerik: (sec) => [
-      h('p', { class: 'modal-text', text: 'Hangi eşyayı kullanacaksın? İsteğin GM\'e gider; onaylarsa saldırırsın.' }),
+      h('p', { class: 'modal-text', text: `Hangi eşyayı kullanacaksın? İsteğin GM'e gider; onaylarsa saldırırsın ve turun biter.${yurumediNotu()}` }),
       h('ul', { class: 'item-grid pick-grid' }, ...gruplar.map((g) => h('li', {}, esyaKarti(g.esya, { adet: g.adet, tikla: () => sec(g.siralar[0]) })))),
     ],
   });
@@ -320,6 +324,7 @@ function kur() {
   });
   harita.on('yuru', (x, y) => gonder({ t: 'hareket', x, y }));
   harita.on('yolYok', () => bildir('Oraya gidecek bir yol yok.'));
+  harita.on('yuruyemez', () => bildir('Bu tur yürüdün. Şimdi saldırabilir, büyü yapabilir ya da turu bitirebilirsin.'));
   harita.on('duvarEkle', (x1, y1, x2, y2) => gonder({ t: 'duvar_ekle', x1, y1, x2, y2 }));
   harita.on('duvarSil', (id) => gonder({ t: 'duvar_sil', id }));
   harita.on('tasi', (id, x, y, serbest) => gonder({ t: 'tasi', id, x, y, ...(serbest ? { serbest: true } : {}) }));
@@ -558,7 +563,7 @@ function mesaj(m) {
       harita.ayarla(m);
       const sonuc = tur.ayarla(m);
       if (sonuc.yeniSira && sonuc.siraBende && !ilk) {
-        bildir('Sıra sende! Yürümek için haritaya, saldırmak ya da büyü yapmak için bir karaktere tıkla.', 'ok');
+        bildir('Sıra sende! Önce yürü: haritaya tıkla ya da yürümeden geç. Sonra saldırmak ya da büyü yapmak için bir karaktere tıkla.', 'ok');
         if (dar.matches && !$('#uygulama').classList.contains('show-yan')) rozet(Math.max(okunmamis, 1));
       }
       siraBende = sonuc.siraBende;

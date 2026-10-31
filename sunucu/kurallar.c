@@ -1,22 +1,23 @@
 /*
  * ===================== OYUN KURALLARIN BURAYA =====================
  *
- * Sunucu bu dosyadaki dört fonksiyonu çağırır:
+ * Her turda sırası gelen karakter önce yürür (ya da yürümeden geçer), sonra bir eylem yapar (saldırı ya da
+ * büyü) ya da eylem yapmadan bitirir; sonra tur biter. Sunucu bu dosyadaki fonksiyonları çağırır:
  *
  *   her_tur(o)                      bir karakterin sırası başladığında
- *   hareket(o, x, y)                GM sırası gelen oyuncunun yürüyüşünü onayladığında
- *   saldiri(saldiran, hedef, esya)  GM bir saldırıyı onayladığında
- *   buyu(yapan, hedef, buyu_adi)    GM bir büyüyü onayladığında
+ *   hareket(o, x, y)                yürüme: GM yürüyüşü onaylayınca; yürümeden geçerse yol_uzunlugu 0 ile
+ *   saldiri(saldiran, hedef, esya)  eylem: GM bir saldırıyı onaylayınca (1 döndürürse saldırı olur)
+ *   buyu(yapan, hedef, buyu_adi)    eylem: GM bir büyüyü onaylayınca (1 döndürürse büyü olur)
+ *   eylem_yok(o)                    eylem: karakter saldırmadan, büyü yapmadan turunu bitirince
  *
- * Turlar başlamadan kimse yürüyemez, saldıramaz, büyü yapamaz; dördü de yalnızca tur sırasında çağrılır.
+ * Turlar başlamadan kimse yürüyemez, saldıramaz, büyü yapamaz; hepsi yalnızca tur sırasında çağrılır.
  *
  * Bir Oyuncu'da (oyuncular da NPC'ler de) şunlar var (ayrıntılar kurallar.h içinde):
  *
  *   o->ad                       adı
  *   o->x, o->y                  konumu, kare biriminde (değiştirirsen taşınır)
  *   o->can, o->odak, o->zirh, o->buyu_direnci
- *   o->enerji                   aksiyon puanı; 0 olunca sıra geçer (sıra başında ne olacağını her_tur'da,
- *                               ne kadar harcanacağını öbür fonksiyonlarda sen yazarsın; sunucu dokunmaz)
+ *   o->enerji                   sunucu dokunmaz; ne kadar kazanılıp harcanacağını bu dosyada sen yazarsın
  *   o->azami.can, o->azami.enerji, ...  statların azami değerleri (GM belirler; 0: azamisi yok).
  *                               Sunucu bir statı azamisinin üstünde bırakmaz.
  *   o->agirlik                  ağırlığı: KARAKTER_AGIRLIGI (70) + eşyalarının ağırlıkları (salt okunur)
@@ -76,96 +77,54 @@ const char *const buyuler[] = {
     NULL
 };
 
-/* ------------------------------------------------------------------ her sıranın başında
+/* ------------------------------------------------------------------ enerji
  *
- * Sunucu enerjiye dokunmaz; sıra başında ne olacağını burada sen belirlersin. Şimdilik enerji azamisine dolar
- * (GM azamiyi karakter düzenleyicisinden verir; azami yoksa 10). Örnek: o->enerji += 3; birikerek artar.
- * Dönüşte enerjisi 0 ya da altındaysa sırası hemen geçer.
+ * Yürüme: 4 birim ya da daha az yürüyen (hiç yürümeyen de) 1 enerji kazanır. Daha fazla yürüyen kazanmaz, 4'ü aşan
+ * her birim için 1 enerji harcar. Bir turda en fazla 8 birim yürünür (enerjisi yetmiyorsa yettiği kadar).
+ * Eylem: saldıran ya da büyü yapan 1 enerji harcar; eylem yapmayan 1 enerji kazanır. Sonra tur biter.
  */
+#define BEDAVA_YOL 4.0f /* bu kadar birime kadar yürüyen 1 enerji kazanır */
+#define AZAMI_YOL 8.0f  /* bir turda en fazla bu kadar birim yürünür */
+
 void her_tur(Oyuncu *o)
 {
-    o->enerji = o->azami.enerji > 0 ? o->azami.enerji : 10;
 }
 
-/* ------------------------------------------------------------------ GM bir yürüyüşü onaylayınca
- *
- * o->x, o->y oyuncunun şu anki yeri; x, y gitmek istediği yer (kare cinsinden). Arada duvar varsa karakter
- * duvarın etrafından dolaşır; yürüyeceği yolun uzunluğu yol_uzunlugu'dur.
- * Enerjiyi burada sen düşürürsün; sunucu yürüyüş için kendiliğinden enerji harcamaz.
- *
- *   return 1;                           oyuncu x, y'ye yürür
- *   return 0;                           yerinde kalır (nedenini bildir(o, ...) ile yazarsan
- *                                       oyuncunun ekranında uyarı olarak da çıkar)
- *   o->x, o->y'yi değiştir, return 1;   yeni yazdığın yere yürür
- *
- * Dönüşten sonra enerjisi 0 ya da altındaysa sırası biter.
- */
 int hareket(Oyuncu *o, float x, float y)
 {
-    float mesafe = yol_uzunlugu;                 /* yürünecek yolun uzunluğu (duvarların etrafından), kare cinsinden */
-    float bedel = (mesafe > 4.0) ? (mesafe - 4.0) : 0.0;    /* kare başına 1 enerji */
-
-    if (bedel > o->enerji) {
-        bildir(o, "Enerjin yetmiyor: bu yol %.1f enerji ister, %.1f enerjin var.", bedel, o->enerji);
-        return 0;                               /* yerinde kalır */
+    float yol = yol_uzunlugu;
+    float azami = fminf(AZAMI_YOL, BEDAVA_YOL + fmaxf(o->enerji, 0)); /* enerjinin yettiği kadar */
+    if (yol > azami) {
+        yol_noktasi(azami, &o->x, &o->y); /* yolun ilk "azami" birimini yürür */
+        bildir(o, "Bu tur en fazla %g birim yürüyebilirsin; o kadarını yürüdün.", roundf(azami * 10) / 10);
+        yol = azami;
     }
-    
-    gm_bildir("HAREKET: %s (%.1f,%.1f) -> (%.1f,%.1f) tur %d enerji %.1f", o->ad, o->x, o->y, x, y, tur_sayisi, o->enerji);
-    o->enerji -= bedel;
+    if (yol <= BEDAVA_YOL) o->enerji += 1;
+    else o->enerji -= yol - BEDAVA_YOL;
     return 1;
 }
 
-/* ------------------------------------------------------------------ GM bir saldırıyı onaylayınca */
-
-void saldiri(Oyuncu *saldiran, Oyuncu *hedef, Esya *esya)
+int saldiri(Oyuncu *saldiran, Oyuncu *hedef, Esya *esya)
 {
-    if(strcmp(esya->sinif, "silah") != 0){
-        bildir(saldiran, "Bu bir silah değil!");
-        return;
+    if (saldiran->enerji < 1) {
+        bildir(saldiran, "Enerjin yetmiyor: saldırı 1 enerji ister.");
+        return 0;
     }
-
-    int miktar, bedel;
-    if(strstr(esya->ad,"Uzun") != NULL){
-        miktar = 20;
-        bedel = 2;
-    } else if(strstr(esya->ad,"Kısa") != NULL){
-        miktar = 12;
-        bedel = 1;
-    } else if(strstr(esya->ad,"Yumruk") != NULL){
-        miktar = 4;
-        bedel = 1;
-    } else{
-        bildir(saldiran, "Bilinmeyen eşya!");
-        return;
-    }
-
-    if(saldiran->enerji>bedel){
-        saldiran->enerji -= bedel;
-        hedef->can -= zar_at(1,miktar);
-        bildir(saldiran, "SALDIRI: %s -> %s [%s/%s] can %.0f", saldiran->ad, hedef->ad, esya->ad, esya->sinif, hedef->can);
-    } else{
-        bildir(saldiran, "Enerjin yetmiyor!");
-    }
+    saldiran->enerji -= 1;
+    return 1;
 }
 
-/* ------------------------------------------------------------------ GM bir büyüyü onaylayınca
- *
- * buyu_adi yukarıdaki buyuler listesinden biridir. hedef, yapanın kendisi de olabilir.
- * Canı 0 ya da altına inen hemen ölür; yapanın enerjisi biterse sırası geçer.
- */
-void buyu(Oyuncu *yapan, Oyuncu *hedef, const char *buyu_adi)
+int buyu(Oyuncu *yapan, Oyuncu *hedef, const char *buyu_adi)
 {
-    int bedel = 2;
-    if (yapan->enerji < bedel) {
-        bildir(yapan, "Enerjin yetmiyor!");
-        return;
+    if (yapan->enerji < 1) {
+        bildir(yapan, "Enerjin yetmiyor: büyü 1 enerji ister.");
+        return 0;
     }
-    yapan->enerji -= bedel;
+    yapan->enerji -= 1;
+    return 1;
+}
 
-    if (strcmp(buyu_adi, "İyileştir") == 0) {
-        hedef->can += zar("1d6");
-    } else if (strcmp(buyu_adi, "Ateş topu") == 0) {
-        int hasar = zar("1d8") - (int)hedef->buyu_direnci;
-        if (hasar > 0) hedef->can -= hasar;
-    }
+void eylem_yok(Oyuncu *o)
+{
+    o->enerji += 1;
 }

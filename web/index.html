@@ -130,7 +130,7 @@
             <button class="btn" id="sira-zarla" type="button">Zarla sırala</button>
             <button class="btn btn-primary" id="sira-baslat" type="button">Turları başlat</button>
           </div>
-          <p class="hint">Turlar başlamadan kimse yürüyemez, saldıramaz, büyü yapamaz. Sırası gelen karakter için sunucu <b>her_tur()</b>'u çağırır; enerjinin ne olacağını o belirler. Yürüyüşte <b>hareket()</b>, saldırıda <b>saldiri()</b>, büyüde <b>buyu()</b> enerjiyi düşürür. Enerjisi bitince ya da "Turu bitir"e basınca sıra geçer. Saldırı ya da büyüyle canı 0 ya da altına inen hemen, başka yoldan inen sıra bitince ölür. Haritada olmayanın sırası geçilir. NPC'ler de sıraya girer: sırası gelen NPC'yi haritada sürüklersen <b>hareket()</b>'e göre yürür (Shift'e basılı tutarak bırakırsan kurallara bakmadan taşınır).</p>
+          <p class="hint">Turlar başlamadan kimse yürüyemez, saldıramaz, büyü yapamaz. Her sıra iki aşamalıdır: sırası gelen önce yürür (ya da yürümeden geçer), sonra saldırır ya da büyü yapar; saldırı ya da büyü olunca ya da "Turu bitir"e basınca sıra geçer. Sıra başında kurallar.c'deki <b>her_tur()</b>, yürüyüşte <b>hareket()</b>, saldırıda <b>saldiri()</b>, büyüde <b>buyu()</b>, eylem yapmadan bitirince <b>eylem_yok()</b> çağrılır; enerjiyi onlar belirler. Saldırı ya da büyüyle canı 0 ya da altına inen hemen, başka yoldan inen sıra bitince ölür. Haritada olmayanın sırası geçilir. NPC'ler de sıraya girer: sırası gelen NPC'yi yürüme aşamasında haritada sürüklersen <b>hareket()</b>'e göre yürür (Shift'e basılı tutarak bırakırsan kurallara bakmadan taşınır).</p>
         </div>
       </details>
 
@@ -211,7 +211,7 @@
             <label class="check"><input type="checkbox" id="ayar-tam-sayi"> Konumlar tam sayı olsun</label>
             <p class="hint">Açıkken herkes karelerin ortasında durur; kurallara giden konum karenin numarasıdır: <b>o-&gt;x</b>, <b>o-&gt;y</b> ve <b>hareket()</b>'e gelen x, y hep tam sayı ((0,0) sol üstteki kare). Seçenek herkes için aynıdır.</p>
             <button class="btn btn-primary" type="submit">Ayarları kaydet</button>
-            <p class="hint">Sıra başında enerjinin ne olacağını kurallar.c'deki <b>her_tur()</b> belirler; sunucu enerjiye dokunmaz. Şifreyi değiştirince oyuncular oyundan çıkar ve yeni şifreyle tekrar girer. GM şifresi sunucudaki <b>.env</b> dosyasındaki <b>GM_SIFRESI</b>'dir; değiştirmek kurulum işidir.</p>
+            <p class="hint">Enerjinin ne kadar kazanılıp harcanacağını kurallar.c belirler (<b>her_tur()</b>, <b>hareket()</b>, <b>saldiri()</b>, <b>buyu()</b>, <b>eylem_yok()</b>); sunucu enerjiye dokunmaz. Şifreyi değiştirince oyuncular oyundan çıkar ve yeni şifreyle tekrar girer. GM şifresi sunucudaki <b>.env</b> dosyasındaki <b>GM_SIFRESI</b>'dir; değiştirmek kurulum işidir.</p>
           </form>
           <div class="field">
             <span class="field-label">Oyuncular</span>

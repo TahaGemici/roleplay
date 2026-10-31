@@ -20,17 +20,23 @@ void her_tur(Oyuncu *o)
     o->enerji = 5;
 }
 
-void saldiri(Oyuncu *saldiran, Oyuncu *hedef, Esya *esya)
+/* 7 hasar, 2 enerji; enerjisi 2'den azsa saldırı olmaz */
+int saldiri(Oyuncu *saldiran, Oyuncu *hedef, Esya *esya)
 {
     duyur("SALDIRI: %s -> %s [%s/%s] can %.0f", saldiran->ad, hedef->ad, esya->ad, esya->sinif, hedef->can);
+    if (saldiran->enerji < 2) {
+        bildir(saldiran, "YORGUN: %.1f", saldiran->enerji);
+        return 0;
+    }
     hedef->can -= 7;
     saldiran->enerji -= 2;
     if (strcmp(esya->ad, "Itme") == 0) hedef->x += 1;
     if (strcmp(esya->ad, "Bozuk") == 0) hedef->zirh = NAN;
     if (strcmp(esya->sinif, "iksir") == 0) envanter_cikar(saldiran, (int)(esya - saldiran->envanter));
+    return 1;
 }
 
-/* Kare başına 1 enerji, yetmezse reddeder.
+/* Kare başına 1 enerji, yetmezse reddeder (yürümeden geçmek bedava).
    x >= 20'ye gitmek isteyeni kural yalnızca 1 kare sağa yürütür (hedefi kuralın değiştirmesi). */
 int hareket(Oyuncu *o, float x, float y)
 {
@@ -50,10 +56,18 @@ int hareket(Oyuncu *o, float x, float y)
 }
 
 /* Şifa 3 can verir, Yıldırım 4 hasar; ikisi de 1 enerji */
-void buyu(Oyuncu *yapan, Oyuncu *hedef, const char *buyu_adi)
+int buyu(Oyuncu *yapan, Oyuncu *hedef, const char *buyu_adi)
 {
     duyur("BUYU: %s -> %s [%s] can %.0f", yapan->ad, hedef->ad, buyu_adi, hedef->can);
     yapan->enerji -= 1;
     if (strcmp(buyu_adi, "Şifa") == 0) hedef->can += 3;
     else hedef->can -= 4;
+    return 1;
+}
+
+/* Eylem yapmayan dinlenir: 1 enerji */
+void eylem_yok(Oyuncu *o)
+{
+    duyur("EYLEM YOK: %s enerji %.1f", o->ad, o->enerji);
+    o->enerji += 1;
 }

@@ -1838,11 +1838,67 @@ input[type="checkbox"] {
   font: 700 15px/1 var(--sans);
   font-variant-numeric: tabular-nums;
 }
+/* Turun aşamaları: 1 Yürü, 2 Eylem */
+.turn-steps {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.turn-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  color: var(--bone-dim);
+  font: 700 14px/1.2 var(--sans);
+}
+.step-num {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--wood-3);
+  font-size: 12px;
+  font-variant-numeric: lining-nums tabular-nums;
+}
+.step-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.turn-step.is-current {
+  border-color: var(--brass);
+  background: rgba(201, 162, 74, 0.12);
+  color: var(--bone);
+}
+.turn-step.is-current .step-num {
+  background: var(--brass);
+  color: var(--ink);
+}
+.turn-step.is-done {
+  opacity: 0.65;
+}
+.turn-actions {
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+.turn-actions .btn {
+  height: 48px;
+  font-size: 16px;
+}
 .end-turn {
   width: 100%;
-  height: 48px;
-  margin-top: 14px;
-  font-size: 17px;
 }
 .gm-turn-tools {
   display: flex;

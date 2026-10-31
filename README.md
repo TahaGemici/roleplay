@@ -4,7 +4,7 @@ Kendi sunucunda çalışan, Fallout 1 gibi sıra tabanlı bir sanal oyun masası
 
 - **GM ekranı:** `https://alanadin/gm`, GM şifresiyle girilir. GM her şeyi görür ve yönetir.
 - **Oyuncu ekranı:** `https://alanadin/`, isim ve oyun şifresiyle girilir. Oyuncu yalnızca kendi statlarını ve görüş menzilindekini görür; duvarların arkasını görmez, haritanın nerede bittiğini bilmez.
-- **Sıra tabanlı:** Sırası gelen oyuncu haritaya tıklayıp yürür; bir karaktere tıklayıp saldırır ya da büyü yapar. Hepsi GM'in onayına gider. NPC'ler de sıraya girer.
+- **Sıra tabanlı:** Her sıra iki aşamalıdır: sırası gelen önce haritaya tıklayıp yürür (ya da yürümeden geçer), sonra bir karaktere tıklayıp saldırır ya da büyü yapar; sonra sıra geçer. Hepsi GM'in onayına gider. NPC'ler de sıraya girer.
 - **Tepkiler:** Alkış, kahkaha, ağlama ve bağırma. Bağırmayı duvarların arkasındakiler de duyar.
 - **Bağlantı:** Sağ üstte oyundakilerin (GM dahil) adının yanında bağlantılarının kalitesi ve gecikmesi görünür.
 - **Duvarlar:** GM haritanın üstüne duvar çizer. Duvarın üstünden geçilmez, görüş sisi açıkken arkası görülmez. Yürüyüş duvarların etrafından dolaşan en kısa yoldan gider; yol haritada çizilir.
@@ -72,67 +72,72 @@ gh release download -R TahaGemici/roleplay -p roleplay.raw -p kur.sh --clobber &
 
 ## Oyun kuralları: `sunucu/kurallar.c`
 
-Sunucu dört fonksiyonunu çağırır:
+Her sıra iki aşamalıdır: sırası gelen karakter önce yürür (ya da yürümeden geçer), sonra bir eylem yapar (saldırı ya da büyü) ya da eylem yapmadan turunu bitirir; sonra sıra geçer. Sunucu beş fonksiyonunu çağırır:
 
-- `her_tur(o)`: bir karakterin (oyuncu ya da NPC) sırası başlarken. Sunucu enerjiye dokunmaz: sıra başında enerjinin ne olacağına burada sen karar verirsin (azamisine doldur, biraz artır, ne istersen).
-- `hareket(o, x, y)`: GM bir yürüyüşü onaylayınca ya da sırası gelen NPC'yi haritada sürükleyince. `1` döndürürsen karakter yürür, `0` döndürürsen yerinde kalır. Enerjiyi sen düşürürsün. Arada duvar varsa karakter duvarların etrafından dolaşır; yürüyeceği yolun uzunluğu `yol_uzunlugu`'dur.
-- `saldiri(saldiran, hedef, esya)`: GM bir saldırıyı onaylayınca.
-- `buyu(yapan, hedef, buyu_adi)`: GM bir büyüyü onaylayınca. Hedef, yapanın kendisi de olabilir.
+- `her_tur(o)`: bir karakterin (oyuncu ya da NPC) sırası başlarken, yürümeden önce.
+- `hareket(o, x, y)`: yürüme aşaması. GM bir yürüyüşü onaylayınca ya da sırası gelen NPC'yi haritada sürükleyince. Karakter yürümeden geçerse ("Yürümeden geç", "Turu bitir" ya da yürümeden saldırıp büyü yaparsa) `yol_uzunlugu` 0 ile çağrılır. `1` döndürürsen karakter yürür ve eylem aşaması başlar (bir turda bir kez yürünür); `0` döndürürsen yerinde kalır ve başka bir yer seçebilir. Arada duvar varsa karakter duvarların etrafından dolaşır; yürüyeceği yolun uzunluğu `yol_uzunlugu`'dur.
+- `saldiri(saldiran, hedef, esya)`: eylem aşaması; GM bir saldırıyı onaylayınca. `1` döndürürsen saldırı olur ve sıra geçer; `0` döndürürsen olmaz (ör. enerjisi yetmiyorsa), karakter başka bir şey deneyebilir ya da turu bitirebilir.
+- `buyu(yapan, hedef, buyu_adi)`: eylem aşaması; GM bir büyüyü onaylayınca. Hedef, yapanın kendisi de olabilir. Dönüş değeri `saldiri()`'deki gibidir.
+- `eylem_yok(o)`: karakter saldırmadan, büyü yapmadan turunu bitirince ("Turu bitir"e bastı ya da GM sırasını geçti). Dönüşte sıra geçer.
 
 Ayrıca üç liste tanımlarsın: eşya sınıfları (`esya_siniflari`), büyüler (`buyuler`) ve herkeste olan bırakılamaz eşya (`yumruk`).
 
-Sıra başında ya da bir işten sonra enerjisi 0 ya da altında olan karakterin sırası biter. Saldırı ya da büyüyle canı 0 ya da altına inen hemen ölür; başka yoldan inen sırası bitince ölür.
+Sunucu enerjiye hiç dokunmaz ve sırayı enerjiye göre geçirmez: enerjinin ne kadar kazanılıp harcanacağını bu fonksiyonlarda sen yazarsın. Saldırı, büyü ya da `her_tur()` ile canı 0 ya da altına inen hemen ölür; başka yoldan inen sırası bitince ölür.
+
+Şu anki kurallar:
+
+- 4 birim ya da daha az yürüyen (hiç yürümeyen de) 1 enerji kazanır. Daha fazla yürüyen enerji kazanmaz, 4'ü aşan her birim için 1 enerji harcar. Bir turda en fazla 8 birim yürünür; enerjisi yetmiyorsa yettiği kadar (4 + enerjisi) yürür.
+- Saldıran ya da büyü yapan 1 enerji harcar (enerjisi 1'den azsa saldıramaz, büyü yapamaz). Eylem yapmayan 1 enerji kazanır. Sonra tur biter.
 
 ```c
-#include "kurallar.h"
-#include <math.h>
-#include <stddef.h>
-#include <string.h>
-
-const char *const esya_siniflari[] = { "silah", "zirh", "iksir", NULL };
-const char *const buyuler[] = { "Ateş topu", "İyileştir", NULL };
-const Esya yumruk = { .ad = "Yumruk", .sinif = "silah", .dayaniklilik = 100 };
+#define BEDAVA_YOL 4.0f /* bu kadar birime kadar yürüyen 1 enerji kazanır */
+#define AZAMI_YOL 8.0f  /* bir turda en fazla bu kadar birim yürünür */
 
 void her_tur(Oyuncu *o)
 {
-    o->enerji += 5 + o->odak / 2; /* azamisi varsa sunucu onu aşmasına izin vermez */
 }
 
 int hareket(Oyuncu *o, float x, float y)
 {
-    float yuk = o->agirlik - KARAKTER_AGIRLIGI;                 /* taşıdığı eşyaların ağırlığı */
-    float bedel = yol_uzunlugu + yuk / 10;                       /* yolun uzunluğu; yük yürümeyi zorlaştırır */
-    if (bedel > o->enerji) {
-        bildir(o, "Enerjin yetmiyor.");
-        return 0;
+    float yol = yol_uzunlugu;
+    float azami = fminf(AZAMI_YOL, BEDAVA_YOL + fmaxf(o->enerji, 0)); /* enerjinin yettiği kadar */
+    if (yol > azami) {
+        yol_noktasi(azami, &o->x, &o->y); /* yolun ilk "azami" birimini yürür */
+        bildir(o, "Bu tur en fazla %g birim yürüyebilirsin; o kadarını yürüdün.", roundf(azami * 10) / 10);
+        yol = azami;
     }
-    o->enerji -= bedel;
+    if (yol <= BEDAVA_YOL) o->enerji += 1;
+    else o->enerji -= yol - BEDAVA_YOL;
     return 1;
 }
 
-void saldiri(Oyuncu *saldiran, Oyuncu *hedef, Esya *esya)
+int saldiri(Oyuncu *saldiran, Oyuncu *hedef, Esya *esya)
 {
-    saldiran->enerji -= 4;
-    if (zar("1d20") + saldiran->odak > 10 + hedef->zirh) {
-        int hasar = esya->sabit ? zar("1d4") : zar("1d8"); /* yumruk daha az vurur */
-        hedef->can -= hasar;
-        duyur("%s vurdu: %d hasar.", saldiran->ad, hasar);
-        if (!esya->sabit && (esya->dayaniklilik -= 5) <= 0) { /* her vuruşta aşınır */
-            duyur("%s kırıldı!", esya->ad);
-            envanter_cikar(saldiran, (int)(esya - saldiran->envanter));
-        }
-    } else {
-        duyur("%s ıskaladı.", saldiran->ad);
+    if (saldiran->enerji < 1) {
+        bildir(saldiran, "Enerjin yetmiyor: saldırı 1 enerji ister.");
+        return 0;
     }
+    saldiran->enerji -= 1;
+    return 1;
 }
 
-void buyu(Oyuncu *yapan, Oyuncu *hedef, const char *buyu_adi)
+int buyu(Oyuncu *yapan, Oyuncu *hedef, const char *buyu_adi)
 {
-    yapan->enerji -= 2;
-    if (strcmp(buyu_adi, "İyileştir") == 0) hedef->can += zar("1d6");
-    else hedef->can -= zar("1d8");
+    if (yapan->enerji < 1) {
+        bildir(yapan, "Enerjin yetmiyor: büyü 1 enerji ister.");
+        return 0;
+    }
+    yapan->enerji -= 1;
+    return 1;
+}
+
+void eylem_yok(Oyuncu *o)
+{
+    o->enerji += 1;
 }
 ```
+
+Hasar, iyileşme, ıskalama gibi şeyleri de bu fonksiyonlara sen eklersin; ör. saldırıda `if (zar("1d20") > 10 + hedef->zirh) hedef->can -= zar("1d8");`.
 
 **Kullanabileceklerin** (`sunucu/kurallar.h`):
 
@@ -165,17 +170,18 @@ Fonksiyonlar hızlı bitmeli; çalışırken sunucu bekler. Değişiklikten sonr
 - Eşyaları katalogdan haritaya sürükler. Bir karakterin üstüne bırakılan eşya onun envanterine gider; boş yere bırakılan yerde durur.
 - Yerdeki eşyalara tıklayınca seçer; Ctrl ya da Shift ile tıklayarak birden çoğunu seçer, boş yerde Shift'e basılı tutup sürükleyerek kutu içindekileri seçer. Seçilenler birlikte sürüklenir. Haritanın altındaki çubuktan ya da kısayollarla kopyalar (Ctrl+D yanına, Ctrl+C ve Ctrl+V imlecin olduğu yere) ve kaldırır (Delete); Esc seçimi bırakır. Seçili tek eşyaya bir daha tıklamak ya da çift tıklamak ayrıntısını açar.
 - NPC'leri yönetir: "NPC ekle"ye tıklarsa hiçbir haritada olmayan bir NPC oluşur (sonra listeden haritaya sürüklenir); düğmeyi haritaya sürüklerse NPC bırakılan yerde oluşur. Statlarını, azamilerini, parasını, envanterini ve notunu (yalnızca GM görür; NPC'nin ne yaptığını, ne bildiğini yazmak için) düzenler; adına tepki verir; bir NPC adına oyuncuyla takas yapar ("Takas…"). "Kopyala" seçili NPC'nin aynısını (adı, statları, parası, envanteri, notu, görünümü aynı) yanına koyar; haritada olmayan NPC'nin kopyası da haritada olmaz. Asıl NPC sıradaysa kopyası hemen arkasına girer. "Haritadan kaldır" NPC'yi de haritadan alır.
-- Tur sırasını kurar, "Turları başlat"a basar; yürüme, saldırı ve büyü isteklerini onaylar ya da reddeder. Yeni NPC'ler de sıraya girer: sırası gelen NPC'yi haritada sürüklerse NPC `hareket()`'e göre yürür ve enerjisi harcanır; Shift'e basılı tutarak bırakırsa kurallara bakmadan taşınır.
+- Tur sırasını kurar, "Turları başlat"a basar; yürüme, saldırı ve büyü isteklerini onaylar ya da reddeder. Tur kartında sıradakinin hangi aşamada olduğu (1 Yürü, 2 Eylem) görünür; "Sıradakine geç" sırayı eylemsiz bitirir. Yeni NPC'ler de sıraya girer: sırası gelen NPC'yi yürüme aşamasında haritada sürüklerse NPC `hareket()`'e göre yürür (ya da GM tur kartındaki "Yürümeden geç"e basar); sonra NPC'ye Karakterler bölümünden saldırtır ya da büyü yaptırır (olunca sırası biter) ya da "Sıradakine geç"e basar. Shift'e basılı tutarak bırakırsa NPC kurallara bakmadan taşınır.
 - Karakterlerin statlarını ve azamilerini (ağırlık hariç; ekranda `22/35`), paralarını, eşyalarının ağırlığını ve dayanıklılığını, görünümünü (resim ve şapka) ve oyun klasöründeki dosyaları GM ekranından yönetir.
 - Ayarlar'dan görüş menzilini herkes için tek bir değer olarak belirler; **Konumlar tam sayı olsun**'u açarsa herkes kare ortasında durur ve kurallar konumu kare numarası olarak görür. Yeni bir maç için "Maçı sıfırla"ya basar.
 
 **Oyuncu:**
 
-- Sırası gelince haritaya tıklayıp yürür. Arada duvar varsa yol duvarların etrafından dolaşır; tıklamadan önce yol ve uzunluğu haritada çizilir. Yolu olmayan yere ("Yol yok") yürünmez. Yolu üstündeki ya da yürüyüşünün bittiği yerdeki eşyayı, envanteri dolu değilse alır.
+- Sırası gelince önce yürür: haritaya tıklar ya da "Yürümeden geç"e basar. Sonra eylem: bir karaktere tıklayıp saldırır ya da büyü yapar; olunca sırası biter. Eylem yapmayacaksa "Turu bitir"e basar. Hangi aşamada olduğu tur kartında görünür (1 Yürü, 2 Eylem).
+- Arada duvar varsa yol duvarların etrafından dolaşır; tıklamadan önce yol ve uzunluğu haritada çizilir. Yolu olmayan yere ("Yol yok") yürünmez. Yolu üstündeki ya da yürüyüşünün bittiği yerdeki eşyayı, envanteri dolu değilse alır.
 - Görüş sisi açıkken duvarların arkasını görmez. Gördüğü yerleri karartılmış ve hafif bulanık olarak hatırlar; başkalarının yürüyüşünün de yalnızca gördüğü kısmını görür.
 - Sağ tıkla (dokunmatikte uzun basarak) işaret bırakır. İşareti yalnızca orayı gören oyuncular görür ve duyar; GM hepsini görür.
 - Haritanın sol altındaki düğmelerle tepki verir: alkış, kahkaha, ağlama, bağırma. Tepkiyi onu görenler görür; bağırmayı aynı haritada görüş menzili kadar yakındaki (çapı menzilin iki katı olan çemberdeki) herkes duvarlardan bağımsız duyar, görmeyen sesin geldiği yeri görür.
-- Bir karaktere tıklayınca "Saldır", "Büyü yap" ya da "Takas"ı seçer; kendine tıklayınca kendine büyü yapar. Takas her zaman yapılabilir (sıra beklemez).
+- Bir karaktere tıklayınca "Saldır", "Büyü yap" ya da "Takas"ı seçer; kendine tıklayınca kendine büyü yapar. Yürümeden saldırır ya da büyü yaparsa o tur yürümeden geçmiş sayılır. Takas her zaman yapılabilir (sıra beklemez).
 - Takasta iki taraf da en fazla 4 çeşit eşya ya da para koyar; kimse karşısının envanterini görmez, yalnızca ortaya konanları görür. İkisi de onaylayınca takas olur; teklif değişince onaylar düşer.
 - Yanındaki bir ölüye tıklayınca üstünü arar: eşyalarını ve parasını tek tek ya da hepsini birden alır.
 - Envanterdeki bir eşyayı önüne bırakabilir (en son yürüdüğü yönde, hiç yürümediyse aşağıda) ya da yok edebilir; yumruk bırakılamaz, yok edilemez ve envanterde yer kaplamaz.

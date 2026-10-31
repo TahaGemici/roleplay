@@ -1103,6 +1103,9 @@ export function gmPaneliOlustur({ gonder, harita, gorunumAc }) {
         h('p', { class: 'req-meta req-item' }, e.sabit && !resimli(e) ? h('span', { class: 'spell-icon', 'aria-hidden': 'true', text: '✊' }) : e.ad ? h('img', { src: esyaResmi(e), alt: '' }) : null, h('span', { text: e.sinif ? `${e.ad} · ${e.sinif}` : e.ad || 'eşya' })),
       ];
     }
+    /* Saldırı ya da büyü yürüme aşamasında istendiyse: onaylanınca önce yürümeden geçer */
+    if (ist.tur !== 'hareket' && durum.sira.aktif && durum.sira.sirada === ist.kim && durum.sira.asama !== 'eylem')
+      govde.push(h('p', { class: 'req-meta', text: 'Bu tur henüz yürümedi: onaylarsan yürümeden geçmiş sayılır.' }));
     const onayla = () => {
       const ayar = ist.tur === 'hareket' ? harita.istekHedefi(ist.id) : null;
       gonder({ t: 'istek_onayla', id: ist.id, ...(ayar ? { x: ayar.x, y: ayar.y } : {}) });

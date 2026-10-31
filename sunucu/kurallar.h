@@ -1,20 +1,25 @@
 /*
  * Oyun kuralların için arayüz.
  *
- * Sunucu dört fonksiyonunu çağırır; gövdeleri kurallar.c içinde ve onları sen doldurursun:
+ * Her turda sırası gelen karakter önce yürür (ya da yürümeden geçer), sonra bir eylem yapar (saldırı ya da büyü)
+ * ya da eylem yapmadan bitirir; sonra tur biter ve sıra sonrakine geçer. Sunucu bu beş fonksiyonunu çağırır;
+ * gövdeleri kurallar.c içinde ve onları sen doldurursun:
  *
  *   her_tur(o)                        bir karakterin sırası başladığında
- *   hareket(o, x, y)                  GM sırası gelen oyuncunun yürüyüşünü onayladığında
- *   saldiri(saldiran, hedef, esya)    GM bir saldırıyı onayladığında
- *   buyu(yapan, hedef, buyu_adi)      GM bir büyüyü onayladığında
+ *   hareket(o, x, y)                  yürüme: GM yürüyüşü onaylayınca; yürümeden geçerse yol_uzunlugu 0 ile
+ *   saldiri(saldiran, hedef, esya)    eylem: GM bir saldırıyı onaylayınca
+ *   buyu(yapan, hedef, buyu_adi)      eylem: GM bir büyüyü onaylayınca
+ *   eylem_yok(o)                      eylem: karakter saldırmadan, büyü yapmadan turunu bitirince
  *
- * Turlar başlamadan kimse yürüyemez, saldıramaz ve büyü yapamaz; dördü de yalnızca tur sırasında çağrılır.
+ * Turlar başlamadan kimse yürüyemez, saldıramaz ve büyü yapamaz; hepsi yalnızca tur sırasında çağrılır.
  *
  * Bu dosyadaki tanımlar o fonksiyonlarda kullanabileceğin her şeydir. kurallar.c'yi
  * değiştirdikten sonra programı yeniden derle (make) ve servisi yeniden başlat.
  */
 #ifndef KURALLAR_H
 #define KURALLAR_H
+
+#include <stddef.h> /* NULL */
 
 /* Bir envanterde yumruğun yanında en fazla bu kadar eşya olabilir (yumruk yer kaplamaz). İstersen değiştir ve
    yeniden derle. */
@@ -56,13 +61,13 @@ typedef struct {
                            (karakter karenin ortasında durur). Değiştirirsen karakter oraya düz çizgide itilir: harita
                            sınırları içinde kalır, arada duvar varsa duvarın önünde durur (hareket() için oradaki
                            açıklamaya bak). */
-    float can;          /* 0 ya da altına inerse ölür: saldırı ve büyüde hemen, başka zaman sırası bitince */
+    float can;          /* 0 ya da altına inerse ölür: saldırı, büyü ve her_tur()'dan sonra hemen, başka zaman sırası
+                           bitince */
     float odak;
     float zirh;
     float buyu_direnci;
-    float enerji;       /* aksiyon puanı. Sunucu ona hiç dokunmaz: sıra başında ne olacağını her_tur(), ne kadar
-                           harcanacağını hareket(), saldiri() ve buyu() içinde sen belirlersin; sıra başında ya da
-                           bir işten sonra 0 ya da altındaysa sıra geçer. */
+    float enerji;       /* Sunucu ona hiç dokunmaz ve sırayı ona göre geçirmez: ne kadar kazanılıp harcanacağını
+                           her_tur(), hareket(), saldiri(), buyu() ve eylem_yok() içinde sen belirlersin. */
     Azami azami;        /* statların azami değerleri: o->azami.can, o->azami.enerji... (0: azamisi yok) */
     float agirlik;      /* ağırlığı: KARAKTER_AGIRLIGI (70) + eşyalarının ağırlıkları. Sunucu hesaplar (salt okunur);
                            arttıkça haritadaki pulu büyür (70'te 1 kat, 140'ta 2 kat). */
@@ -94,7 +99,7 @@ extern float yol_uzunlugu;
 
 /* hareket() içinde: yolun başından uzunluk kadar ilerideki noktayı *x, *y'ye yazar (yolun sonunu geçerse hedefi).
    Konumlar tam sayıysa o noktanın bulunduğu karenin numarasını yazar. Yolun bir kısmını yürütmek için:
-   yol_noktasi(o->enerji, &o->x, &o->y); return 1; */
+   yol_noktasi(8, &o->x, &o->y); return 1; */
 void yol_noktasi(float uzunluk, float *x, float *y);
 
 /* ------------------------------------------------------------------ kurallar.c'de senin yazdıkların */
@@ -109,37 +114,43 @@ extern const Esya yumruk;
 /* Büyüler; liste NULL ile biter. Oyuncu bir karaktere tıklayıp "Büyü yap"ı seçince bu listeden seçer. */
 extern const char *const buyuler[];
 
-/* Sıra o karaktere geldiğinde (oyuncular da NPC'ler de). Sunucu enerjiye dokunmaz: sıra başında enerjinin ne
-   olacağını burada sen belirlersin (ör. o->enerji = o->azami.enerji; ya da o->enerji += 3;). Dönüşte enerjisi 0 ya
-   da altındaysa sırası hemen geçer. */
+/* Sıra o karaktere geldiğinde (oyuncular da NPC'ler de), yürümeden önce. Sunucu enerjiye dokunmaz. */
 void her_tur(Oyuncu *o);
 
-/* Sırası gelen oyuncu haritada bir yere tıkladı ve GM bu yürüyüşü onayladı (GM hedefi kaydırdıysa x, y
-   kaydırılmış haldir); ya da sırası gelen NPC'yi GM haritada sürükledi. Çağrıldığında o->x, o->y karakterin şu anki
-   yeri, x, y gitmek istediği yerdir (konumlar tam sayıysa ikisi de karenin numarasıdır). Arada duvar
-   varsa karakter duvarın etrafından dolaşır: yürüyeceği yolun uzunluğu yol_uzunlugu'dur (düz çizgiden uzun olabilir).
+/* Turun yürüme aşaması. Sırası gelen oyuncu haritada bir yere tıkladı ve GM bu yürüyüşü onayladı (GM hedefi
+   kaydırdıysa x, y kaydırılmış haldir); ya da sırası gelen NPC'yi GM haritada sürükledi. Çağrıldığında o->x, o->y
+   karakterin şu anki yeri, x, y gitmek istediği yerdir (konumlar tam sayıysa ikisi de karenin numarasıdır). Arada
+   duvar varsa karakter duvarın etrafından dolaşır: yürüyeceği yolun uzunluğu yol_uzunlugu'dur (düz çizgiden uzun
+   olabilir). Karakter yürümeden geçerse ("Yürümeden geç", "Turu bitir" ya da yürümeden saldırıp büyü yaparsa) de
+   çağrılır: o zaman yol_uzunlugu 0'dır ve x, y şu anki yeridir.
    Enerjiyi sen düşürürsün; sunucu yürüyüş için kendiliğinden enerji harcamaz.
-     1 döndürürsen oyuncu x, y'ye yürür.
-     0 döndürürsen yerinde kalır (ör. enerjisi yetmiyorsa). Nedenini bildir(o, ...) ile yazarsan
-       oyuncunun ekranında uyarı olarak da çıkar.
+     1 döndürürsen karakter x, y'ye yürür ve eylem aşaması başlar (bir turda bir kez yürünür).
+     0 döndürürsen yerinde kalır ve yürüme aşaması sürer: başka bir yer seçebilir. Nedenini bildir(o, ...) ile
+       yazarsan oyuncunun ekranında uyarı olarak da çıkar.
      o->x, o->y'yi değiştirip 1 döndürürsen yeni yazdığın yere yürür (ör. yolu kısaltmak için:
-       yol_noktasi(o->enerji, &o->x, &o->y) yolun enerjinin yettiği yerine kadar yürütür). Oraya da duvarların
-       etrafından gider; yol yoksa yerinde kalır ve hareket() hiç çağrılmamış gibi olur.
+       yol_noktasi(8, &o->x, &o->y) yolun ilk 8 birimini yürütür). Oraya da duvarların etrafından gider; yol yoksa
+       yerinde kalır ve hareket() hiç çağrılmamış gibi olur.
        Yazdığın yer şu anki yerle aynıysa x, y'ye yürür; yerinde kalsın istiyorsan 0 döndür.
-   Dönüşten sonra enerjisi 0 ya da altındaysa sırası biter. GM'in tokenları sürüklemesi bu fonksiyonu
-   çağırmaz (sırası gelen NPC'yi sürüklemesi dışında). Yürüyen, yolunun üstündeki eşyaları alır (envanterinde yer
-   varsa); yürüyüşü bir portalda biterse portalın haritasına geçer. */
+   GM'in tokenları sürüklemesi bu fonksiyonu çağırmaz (sırası gelen NPC'yi yürüme aşamasında sürüklemesi dışında).
+   Yürüyen, yolunun üstündeki eşyaları alır (envanterinde yer varsa); yürüyüşü bir portalda biterse portalın
+   haritasına geçer. */
 int hareket(Oyuncu *o, float x, float y);
 
-/* GM sırası gelen karakterin saldırısını onayladığında (ya da GM onu saldırttığında). esya, saldıranın
-   envanterindeki seçilen eşyadır (esya == &saldiran->envanter[i]; yumruk da olabilir). Çağrıdan sonra canı
-   0 ya da altına inen hemen ölür; saldıranın enerjisi 0 ya da altındaysa sırası biter. */
-void saldiri(Oyuncu *saldiran, Oyuncu *hedef, Esya *esya);
+/* Turun eylem aşaması: GM sırası gelen karakterin saldırısını onayladığında (ya da GM onu saldırttığında). esya,
+   saldıranın envanterindeki seçilen eşyadır (esya == &saldiran->envanter[i]; yumruk da olabilir). Karakter henüz
+   yürümediyse önce hareket() yol_uzunlugu 0 ile çağrılır (yürümeden geçmiş sayılır).
+     1 döndürürsen saldırı olur: animasyon oynar, canı 0 ya da altına inen hemen ölür ve tur biter.
+     0 döndürürsen saldırı olmaz (ör. enerjisi yetmiyorsa; nedenini bildir ile yaz) ve eylem aşaması sürer. */
+int saldiri(Oyuncu *saldiran, Oyuncu *hedef, Esya *esya);
 
-/* GM sırası gelen karakterin büyüsünü onayladığında (ya da GM ona büyü yaptırdığında). buyu_adi, buyuler
-   listesinden seçilendir. hedef, yapanın kendisi de olabilir (kendine büyü, ör. iyileşme). Çağrıdan sonra
-   canı 0 ya da altına inen hemen ölür; yapanın enerjisi 0 ya da altındaysa sırası biter. */
-void buyu(Oyuncu *yapan, Oyuncu *hedef, const char *buyu_adi);
+/* Turun eylem aşaması: GM sırası gelen karakterin büyüsünü onayladığında (ya da GM ona büyü yaptırdığında).
+   buyu_adi, buyuler listesinden seçilendir. hedef, yapanın kendisi de olabilir (kendine büyü, ör. iyileşme).
+   Dönüş değeri ve geri kalanı saldiri() gibidir. */
+int buyu(Oyuncu *yapan, Oyuncu *hedef, const char *buyu_adi);
+
+/* Turun eylem aşaması: karakter saldırmadan ve büyü yapmadan turunu bitirdi ("Turu bitir"e bastı ya da GM sırasını
+   geçti; henüz yürümediyse önce hareket() yol_uzunlugu 0 ile çağrılır). Dönüşte tur biter. */
+void eylem_yok(Oyuncu *o);
 
 /* ------------------------------------------------------------------ yardımcılar */
 

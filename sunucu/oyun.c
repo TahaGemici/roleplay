@@ -183,12 +183,17 @@ typedef struct {
     char *ozet;     /* diğerlerinin göreceği hali (yoksa NULL: hiç görmezler) */
 } Kayit;
 
+/* Bir sıra iki aşamalıdır: önce yürüme (ya da yürümeden geçme), sonra eylem (saldırı, büyü ya da eylemsiz bitirme);
+   eylemden sonra sıra biter. */
+enum { ASAMA_HAREKET = 0, ASAMA_EYLEM = 1 };
+
 typedef struct {
     int aktif;
     char liste[AZAMI_SIRA][ID_N];
     int n;
     int indeks;
     int tur_no;
+    int asama;           /* sıradakinin hangi aşamada olduğu: ASAMA_HAREKET ya da ASAMA_EYLEM */
     float toplam_enerji; /* sıradakinin sıra başındaki enerjisi (ışıklar için) */
 } Sira;
 
@@ -2366,6 +2371,11 @@ static Karakter *siradaki(void)
     return karakter_bul(O.sira.liste[O.sira.indeks]);
 }
 
+static const char *asama_adi(void)
+{
+    return O.sira.asama == ASAMA_EYLEM ? "eylem" : "hareket";
+}
+
 static int sirada_mi(const char *id)
 {
     for (int i = 0; i < O.sira.n; i++)
@@ -2544,8 +2554,8 @@ static void durum_yaz_gm(Buf *b)
     buf_putc(b, ']');
 
     Karakter *s = siradaki();
-    buf_printf(b, ",\"sira\":{\"aktif\":%s,\"tur\":%d,\"indeks\":%d,\"toplam_enerji\":", O.sira.aktif ? "true" : "false",
-               O.sira.tur_no, O.sira.indeks);
+    buf_printf(b, ",\"sira\":{\"aktif\":%s,\"tur\":%d,\"indeks\":%d,\"asama\":\"%s\",\"toplam_enerji\":",
+               O.sira.aktif ? "true" : "false", O.sira.tur_no, O.sira.indeks, asama_adi());
     sayi_yaz(b, O.sira.toplam_enerji);
     buf_puts(b, ",\"sirada\":");
     if (s) buf_json_str(b, s->id);
@@ -2761,8 +2771,8 @@ static void durum_yaz_oyuncu(Buf *b, Istemci *c, Karakter *ben)
     envanter_yaz(b, &ben->o);
 
     Karakter *s = siradaki();
-    buf_printf(b, ",\"sira\":{\"aktif\":%s,\"tur\":%d,\"sirada_ben\":%s,\"toplam_enerji\":", O.sira.aktif ? "true" : "false",
-               O.sira.tur_no, s == ben ? "true" : "false");
+    buf_printf(b, ",\"sira\":{\"aktif\":%s,\"tur\":%d,\"sirada_ben\":%s,\"asama\":\"%s\",\"toplam_enerji\":",
+               O.sira.aktif ? "true" : "false", O.sira.tur_no, s == ben ? "true" : "false", asama_adi());
     sayi_yaz(b, s == ben ? O.sira.toplam_enerji : 0);
     buf_puts(b, ",\"sirada\":");
     if (s && taniyor(ben, s, bl)) {
@@ -3065,6 +3075,18 @@ static void kural_her_tur(Karakter *k)
     bilgileri_guncelle();
 }
 
+/* Karakter saldırmadan, büyü yapmadan sırasını bitirdi: kurallar.c'deki eylem_yok(). */
+static void kural_eylem_yok(Karakter *k)
+{
+    Oyuncu once = k->o;
+    kurallara_gir(k, NULL, "eylem yok");
+    eylem_yok(&k->o);
+    kurallardan_cik();
+    karakter_onar(k, &once, "eylem_yok");
+    konum_degisimi(k, &once);
+    bilgileri_guncelle();
+}
+
 /* hareket() çalışırken yürünecek yol (yol_noktasi için) */
 static const Yol *kural_yolu;
 
@@ -3129,9 +3151,11 @@ static int kural_hareket(Karakter *k, const Yol *yol)
 
 static void olumleri_denetle(void);
 
-/* Kurallar saldırı ya da büyüde iki karakteri değiştirdikten sonra: önce eylem eski yerlerde oynasın, sonra
-   kuralların yaptığı itme vb. yürüsün; canı 0 ya da altına inen hemen ölür. esya: saldırıda kullanılan (büyüde NULL). */
-static void eylemi_oynat(Karakter *a, Karakter *t, const Oyuncu *oa, const Oyuncu *ot, const Esya *esya, const char *buyu_adi)
+/* Kurallar saldırı ya da büyüde iki karakteri değiştirdikten sonra: önce eylem eski yerlerde oynasın (oldu ise; kurallar
+   izin vermediyse animasyon olmaz), sonra kuralların yaptığı itme vb. yürüsün; canı 0 ya da altına inen hemen ölür.
+   esya: saldırıda kullanılan (büyüde NULL). */
+static void eylemi_oynat(Karakter *a, Karakter *t, const Oyuncu *oa, const Oyuncu *ot, const Esya *esya, const char *buyu_adi,
+                         int oldu)
 {
     float ax = a->o.x, ay = a->o.y, tx = t->o.x, ty = t->o.y;
     a->o.x = oa->x;
@@ -3139,8 +3163,9 @@ static void eylemi_oynat(Karakter *a, Karakter *t, const Oyuncu *oa, const Oyunc
     t->o.x = ot->x;
     t->o.y = ot->y;
     double hasar = (double)ot->can - t->o.can;
-    saldiri_yayinla(a, t, esya ? esya->resim : "", esya && !esya->sabit ? esya->sinif : NULL,
-                    buyu_adi ? fabs(hasar) > 1e-6 : hasar > 1e-6, hasar, buyu_adi);
+    if (oldu)
+        saldiri_yayinla(a, t, esya ? esya->resim : "", esya && !esya->sabit ? esya->sinif : NULL,
+                        buyu_adi ? fabs(hasar) > 1e-6 : hasar > 1e-6, hasar, buyu_adi);
     a->o.x = ax;
     a->o.y = ay;
     konum_degisimi(a, oa);
@@ -3153,8 +3178,9 @@ static void eylemi_oynat(Karakter *a, Karakter *t, const Oyuncu *oa, const Oyunc
     olumleri_denetle();
 }
 
-/* Saldırıyı uygular: kayıt, kurallar.c'deki saldiri(), animasyon, ölüm. */
-static void saldiri_uygula(Karakter *a, Karakter *t, int idx)
+/* Saldırıyı uygular: kayıt, kurallar.c'deki saldiri(), animasyon, ölüm. Kurallar izin verdiyse (saldırı olduysa) 1
+   döner. */
+static int saldiri_uygula(Karakter *a, Karakter *t, int idx)
 {
     Esya kopya = a->o.envanter[idx];
     Buf s;
@@ -3163,15 +3189,17 @@ static void saldiri_uygula(Karakter *a, Karakter *t, int idx)
     char m[400];
     snprintf(m, sizeof m, "Saldırı: %s → %s (%s)", a->ad, t->ad, kopya.ad[0] ? kopya.ad : "eşya");
     kayit_metin("saldiri", GOR_GM_SAHIP, s.p, m);
-    buf_free(&s);
 
     Oyuncu oa = a->o, ot = t->o;
     kurallara_gir(a, t, "saldırı");
-    saldiri(&a->o, &t->o, &a->o.envanter[idx]);
+    int oldu = saldiri(&a->o, &t->o, &a->o.envanter[idx]) != 0;
     kurallardan_cik();
     karakter_onar(a, &oa, "saldiri");
     karakter_onar(t, &ot, "saldiri");
-    eylemi_oynat(a, t, &oa, &ot, &kopya, NULL);
+    if (!oldu) kayit_metin("saldiri", GOR_GM_SAHIP, s.p, "Saldırı olmadı.");
+    buf_free(&s);
+    eylemi_oynat(a, t, &oa, &ot, &kopya, NULL, oldu);
+    return oldu;
 }
 
 /* buyuler listesinde mi */
@@ -3183,8 +3211,9 @@ static int buyu_gecerli(const char *ad)
     return 0;
 }
 
-/* Büyüyü uygular: kayıt, kurallar.c'deki buyu(), animasyon, ölüm. Hedef yapanın kendisi olabilir. */
-static void buyu_uygula(Karakter *a, Karakter *t, const char *buyu_adi)
+/* Büyüyü uygular: kayıt, kurallar.c'deki buyu(), animasyon, ölüm. Hedef yapanın kendisi olabilir. Kurallar izin
+   verdiyse (büyü olduysa) 1 döner. */
+static int buyu_uygula(Karakter *a, Karakter *t, const char *buyu_adi)
 {
     char ad[64];
     kirp_onar(ad, sizeof ad, buyu_adi);
@@ -3195,17 +3224,19 @@ static void buyu_uygula(Karakter *a, Karakter *t, const char *buyu_adi)
     if (a == t) snprintf(m, sizeof m, "Büyü: %s → kendine (%s)", a->ad, ad);
     else snprintf(m, sizeof m, "Büyü: %s → %s (%s)", a->ad, t->ad, ad);
     kayit_metin("buyu", GOR_GM_SAHIP, s.p, m);
-    buf_free(&s);
 
     Oyuncu oa = a->o, ot = t->o;
     char arg[64];
     kopyala(arg, sizeof arg, ad); /* kurallar değiştirse de bizim kopyamız kalsın */
     kurallara_gir(a, t, "büyü");
-    buyu(&a->o, &t->o, arg);
+    int oldu = buyu(&a->o, &t->o, arg) != 0;
     kurallardan_cik();
     karakter_onar(a, &oa, "buyu");
     if (t != a) karakter_onar(t, &ot, "buyu");
-    eylemi_oynat(a, t, &oa, &ot, NULL, ad);
+    if (!oldu) kayit_metin("buyu", GOR_GM_SAHIP, s.p, "Büyü olmadı.");
+    buf_free(&s);
+    eylemi_oynat(a, t, &oa, &ot, NULL, ad, oldu);
+    return oldu;
 }
 
 /* ================================================================== tur sırası ve ölüm */
@@ -3238,13 +3269,14 @@ static void siradan_cikar(const char *id)
     }
 }
 
-/* Sıra başı: kurallar.c'deki her_tur() çağrılır (enerjiyi o belirler; sunucu dokunmaz). */
+/* Sıra başı: yürüme aşaması başlar, kurallar.c'deki her_tur() çağrılır (enerjiyi kurallar belirler; sunucu dokunmaz). */
 static void tur_basi(Karakter *k)
 {
     char m[200];
     snprintf(m, sizeof m, "Sıra: %s (tur %d)", k->ad, O.sira.tur_no);
     if (k->npc) kayit_metin("sira", GOR_GM, NULL, m);
     else kayit_metin("sira", GOR_HERKES, NULL, m);
+    O.sira.asama = ASAMA_HAREKET;
     kural_her_tur(k);
     O.sira.toplam_enerji = k->o.enerji > 0 ? k->o.enerji : 0;
     kirlet();
@@ -3259,12 +3291,12 @@ static void olumleri_denetle(void)
     }
 }
 
-/* Sırayı bir sonraki uygun karaktere geçirir; liste başa sarınca tur sayısı artar.
-   Sıra başında enerjisi olmayan karakterin sırası hemen geçer. */
+/* Sırayı bir sonraki uygun karaktere geçirir; liste başa sarınca tur sayısı artar. Sıra başında (her_tur()'dan sonra)
+   canı 0 ya da altına inen ölür, sırası hemen geçer. Enerji sırayı geçirmez: onu kurallar.c harcar. */
 static void sira_ilerle(void)
 {
     if (!O.sira.aktif) return;
-    int uygun = 0, sinir = 2 * O.sira.n + 2;
+    int sinir = 2 * O.sira.n + 2;
     for (int deneme = 0; deneme < sinir && O.sira.n > 0; deneme++) {
         O.sira.indeks++;
         if (O.sira.indeks >= O.sira.n) {
@@ -3282,21 +3314,14 @@ static void sira_ilerle(void)
             }
             continue;
         }
-        uygun = 1;
         tur_basi(k);
-        if (k->o.enerji > 0) return;
-        char m[200];
-        snprintf(m, sizeof m, "%s: enerji yok, sıra geçti.", k->ad);
-        if (k->npc) kayit_metin("sira", GOR_GM, NULL, m);
-        else kayit_metin("sira", GOR_HERKES, NULL, m);
-        istekleri_temizle(k->id);
         olumleri_denetle();
+        if (!k->olu) return;
     }
     O.sira.aktif = 0;
     O.sira.indeks = -1;
     istekleri_temizle(NULL);
-    kayit_metin("sira", GOR_HERKES, NULL,
-                uygun ? "Kimsenin enerjisi kalmadı; tur sırası durdu." : "Sırası gelebilecek kimse kalmadı; tur sırası durdu.");
+    kayit_metin("sira", GOR_HERKES, NULL, "Sırası gelebilecek kimse kalmadı; tur sırası durdu.");
     kirlet();
 }
 
@@ -3310,14 +3335,64 @@ static void tur_bitir_ve_ilerle(void)
     kirlet();
 }
 
-/* Durumu yayınlar; k sıradaysa ve öldüyse ya da enerjisi bittiyse sıra geçer, yeni durum da yayınlanır. */
-static void yayinla_ve_enerji_denetle(Karakter *k)
+/* Sıradakinin bekleyen yürüme isteği düşer (yürüme aşaması bitince). */
+static void yurume_istegini_dusur(const Karakter *k)
 {
+    if (O.istek_var && O.istek.tur == ISTEK_HAREKET && !strcmp(O.istek.kim, k->id)) O.istek_var = 0;
+}
+
+/* Sıradaki yürüdü (ya da yürümeden geçti): eylem aşaması başlar. */
+static void eylem_asamasi(Karakter *k)
+{
+    O.sira.asama = ASAMA_EYLEM;
+    yurume_istegini_dusur(k);
+    kirlet();
+}
+
+/* Sıradaki yürümeden geçer: kurallar.c'deki hareket() 0 uzunlukta bir yolla çağrılır. Kurallar izin verirse eylem
+   aşaması başlar ve 1 döner. */
+static int yurumeden_gec(Karakter *k)
+{
+    if (!haritada(k)) return 0;
+    Yol yol;
+    yol_duz(&yol, k->o.x, k->o.y, k->o.x, k->o.y);
+    int sonuc = kural_hareket(k, &yol);
+    yol_bosalt(&yol);
+    if (sonuc <= 0) return 0;
+    eylem_asamasi(k);
+    return 1;
+}
+
+/* Saldırı ya da büyüden önce: sıradaki henüz yürümediyse yürümeden geçmiş sayılır. Kurallar buna izin vermezse
+   istemciye (ve oyuncuya) yazar, 0 döner; eylem olmaz. */
+static int eyleme_gec(Istemci *c, Karakter *k)
+{
+    if (O.sira.asama == ASAMA_EYLEM) return 1;
+    if (yurumeden_gec(k)) return 1;
+    char m[200];
+    snprintf(m, sizeof m, "Kurallar (hareket()) %s için yürümeden geçmeye izin vermedi; önce yürümeli.", k->ad);
+    istemciye_hata(c, m);
+    if (!k->npc) oyuncuya_bildir(k, "hata", "Kurallara göre önce yürümelisin; eylem olmadı.");
+    return 0;
+}
+
+/* Saldırı ya da büyüden sonra: oldu ise (ya da sıradaki öldüyse) sırası biter. Sonra durum yayınlanır. Kurallar
+   eyleme izin vermediyse sıra eylem aşamasında kalır: başka bir şey deneyebilir ya da turu bitirebilir. */
+static void eylem_sonu(Karakter *k, int oldu)
+{
+    if (O.sira.aktif && siradaki() == k && (oldu || k->olu)) tur_bitir_ve_ilerle();
     herkese_durum();
-    if (O.sira.aktif && siradaki() == k && (k->olu || k->o.enerji <= 0)) {
-        tur_bitir_ve_ilerle();
-        herkese_durum();
+}
+
+/* Sıradaki turunu bitirdi (ya da GM sırasını geçti): henüz yürümediyse yürümeden geçer, eylem yapmadığı için
+   kurallar.c'deki eylem_yok() çağrılır; sonra sıra ilerler. */
+static void sirayi_bitir(Karakter *k)
+{
+    if (k && !k->olu && haritada(k)) {
+        if (O.sira.asama == ASAMA_HAREKET) yurumeden_gec(k);
+        kural_eylem_yok(k);
     }
+    tur_bitir_ve_ilerle();
 }
 
 static int uygun_var(void)
@@ -3472,19 +3547,20 @@ static int eyleme_hazir(Istemci *c, Karakter *ben, const char *eylem)
         durum_gonder(c);
         return 0;
     }
-    if (ben->o.enerji <= 0) {
-        istemciye_hata(c, "Enerjin kalmadı.");
-        return 0;
-    }
     return 1;
 }
 
-/* Oyuncu haritada bir yere tıkladı: GM'e hareket isteği gider. */
+/* Oyuncu haritada bir yere tıkladı: GM'e hareket isteği gider (yalnızca sırasının yürüme aşamasında). */
 static void m_hareket(Istemci *c, Karakter *ben, const Json *j)
 {
     HaritaKaydi *h = haritasi(ben);
     float g, y;
     if (!eyleme_hazir(c, ben, "yürüyebilirsin")) return;
+    if (O.sira.asama != ASAMA_HAREKET) {
+        istemciye_hata(c, "Bu tur yürüdün; şimdi saldırabilir, büyü yapabilir ya da turu bitirebilirsin.");
+        durum_gonder(c);
+        return;
+    }
     if (!h || !harita_olcu(h, &g, &y)) {
         istemciye_hata(c, "Şu an açık bir harita yok.");
         return;
@@ -3577,6 +3653,24 @@ static void m_istek_iptal(Karakter *ben)
     herkese_durum();
 }
 
+/* Sıradaki yürümeden geçer (oyuncu kendi sırasında, GM sıradaki için): eylem aşaması başlar. */
+static void m_yurumeden_gec(Istemci *c, Karakter *ben)
+{
+    Karakter *s = siradaki();
+    if (!c->gm && !eyleme_hazir(c, ben, "yürüyebilirsin")) return;
+    if (!s || s->olu || !haritada(s)) return;
+    if (O.sira.asama != ASAMA_HAREKET) {
+        istemciye_hata(c, c->gm ? "Sıradaki bu tur zaten yürüdü." : "Bu tur zaten yürüdün.");
+        durum_gonder(c);
+        return;
+    }
+    if (!yurumeden_gec(s)) {
+        if (c->gm) istemciye_hata(c, "Kurallar (hareket()) yürümeden geçmeye izin vermedi.");
+        else istemciye_hata(c, "Kurallara göre yürümeden geçemezsin.");
+    }
+    herkese_durum();
+}
+
 static void m_istek_reddet(Istemci *c, const Json *j)
 {
     long long id = 0;
@@ -3623,6 +3717,11 @@ static void m_istek_onayla(Istemci *c, const Json *j)
     if (is.tur == ISTEK_HAREKET) {
         HaritaKaydi *h = haritasi(k);
         float g, y;
+        if (O.sira.asama != ASAMA_HAREKET) {
+            istemciye_hata(c, "Bu karakter bu tur zaten yürüdü.");
+            herkese_durum();
+            return;
+        }
         if (!h || !harita_olcu(h, &g, &y)) {
             herkese_durum();
             return;
@@ -3644,16 +3743,19 @@ static void m_istek_onayla(Istemci *c, const Json *j)
         }
         int sonuc = kural_hareket(k, &yol);
         yol_bosalt(&yol);
-        if (sonuc <= 0) {
+        if (sonuc > 0) {
+            eylem_asamasi(k);
+        } else {
             char m[200];
             if (sonuc < 0) snprintf(m, sizeof m, "Kuralların (hareket()) %s için seçtiği yere yol yok; yürüyüş olmadı.", k->ad);
             else snprintf(m, sizeof m, "Kurallar (hareket()) %s için bu yürüyüşe izin vermedi.", k->ad);
             istemciye_hata(c, m);
             oyuncuya_bildir(k, "hata", "Kurallara göre bu yürüyüş yapılamadı.");
         }
-        yayinla_ve_enerji_denetle(k);
+        herkese_durum();
         return;
     }
+    /* Saldırı ya da büyü: henüz yürümediyse önce yürümeden geçer; eylem olursa sırası biter. */
     Karakter *t = karakter_bul(is.hedef);
     if (is.tur == ISTEK_BUYU) {
         if (!t || !ayni_haritada(k, t) || t->olu || !buyu_gecerli(is.buyu)) {
@@ -3661,8 +3763,16 @@ static void m_istek_onayla(Istemci *c, const Json *j)
             herkese_durum();
             return;
         }
-        buyu_uygula(k, t, is.buyu);
-        yayinla_ve_enerji_denetle(k);
+        if (!eyleme_gec(c, k)) {
+            herkese_durum();
+            return;
+        }
+        if (!ayni_haritada(k, t)) { /* yürümeden geçerken kurallar onu başka yere götürdü */
+            istemciye_hata(c, "Büyü artık yapılamaz (hedef değişti).");
+            herkese_durum();
+            return;
+        }
+        eylem_sonu(k, buyu_uygula(k, t, is.buyu));
         return;
     }
     if (!t || t == k || !ayni_haritada(k, t) || t->olu) {
@@ -3670,14 +3780,22 @@ static void m_istek_onayla(Istemci *c, const Json *j)
         herkese_durum();
         return;
     }
-    int idx = esya_bul(k, &is.esya_kopya, is.esya);
-    if (idx < 0) {
+    if (esya_bul(k, &is.esya_kopya, is.esya) < 0) {
         istemciye_hata(c, "Saldırıda seçilen eşya artık envanterde değil.");
         herkese_durum();
         return;
     }
-    saldiri_uygula(k, t, idx);
-    yayinla_ve_enerji_denetle(k);
+    if (!eyleme_gec(c, k)) {
+        herkese_durum();
+        return;
+    }
+    int idx = esya_bul(k, &is.esya_kopya, is.esya); /* yürümeden geçerken kurallar envanteri değiştirmiş olabilir */
+    if (idx < 0 || !ayni_haritada(k, t) || t->olu) {
+        istemciye_hata(c, "Saldırı artık yapılamaz (hedef ya da eşya değişti).");
+        herkese_durum();
+        return;
+    }
+    eylem_sonu(k, saldiri_uygula(k, t, idx));
 }
 
 /* ================================================================== oturumlar */
@@ -4039,7 +4157,7 @@ static void m_tur_bitir(Istemci *c, Karakter *ben)
         snprintf(m, sizeof m, "GM sırayı geçti (%s).", s->ad);
         kayit_metin("sira", s->npc ? GOR_GM : GOR_HERKES, NULL, m);
     }
-    tur_bitir_ve_ilerle();
+    sirayi_bitir(s);
     herkese_durum();
 }
 
@@ -4252,9 +4370,9 @@ static void m_kesif_sifirla(void)
     herkese_durum();
 }
 
-/* GM bir pulu sürükleyip bıraktı. Sırası gelen NPC'yi sürüklemek onu kurallara göre yürütür (hareket() çağrılır,
-   enerjisi harcanır); serbest (Shift basılıyken bırakılan) ya da başka bir karakteri sürüklemek kurallara bakmadan
-   taşır. */
+/* GM bir pulu sürükleyip bıraktı. Sırası gelen NPC'yi yürüme aşamasında sürüklemek onu kurallara göre yürütür
+   (hareket() çağrılır, sonra eylem aşaması başlar); serbest (Shift basılıyken bırakılan) ya da başka bir karakteri
+   sürüklemek kurallara bakmadan taşır. */
 static void m_tasi(Istemci *c, const Json *j)
 {
     HaritaKaydi *h = aktif_harita();
@@ -4270,8 +4388,8 @@ static void m_tasi(Istemci *c, const Json *j)
     istekleri_temizle(k->id);
     if (k->npc && !k->olu && O.sira.aktif && siradaki() == k && !json_mantik(j, "serbest", 0)) {
         if (mesafe(k->o.x, k->o.y, x, yy) < 0.02) return;
-        if (k->o.enerji <= 0) {
-            istemciye_hata(c, "Bu NPC'nin enerjisi kalmadı. Kurallara bakmadan taşımak için Shift'e basılı tutarak bırak.");
+        if (O.sira.asama != ASAMA_HAREKET) {
+            istemciye_hata(c, "Bu NPC bu tur yürüdü; şimdi saldırabilir, büyü yapabilir ya da sırası bitebilir. Kurallara bakmadan taşımak için Shift'e basılı tutarak bırak.");
             herkese_durum();
             return;
         }
@@ -4283,9 +4401,10 @@ static void m_tasi(Istemci *c, const Json *j)
         }
         int sonuc = kural_hareket(k, &yol);
         yol_bosalt(&yol);
-        if (sonuc < 0) istemciye_hata(c, "Kuralların (hareket()) seçtiği yere yol yok; NPC yürümedi.");
-        else if (!sonuc) istemciye_hata(c, "Kurallar (hareket()) bu yürüyüşe izin vermedi.");
-        yayinla_ve_enerji_denetle(k);
+        if (sonuc > 0) eylem_asamasi(k);
+        else if (sonuc < 0) istemciye_hata(c, "Kuralların (hareket()) seçtiği yere yol yok; NPC yürümedi.");
+        else istemciye_hata(c, "Kurallar (hareket()) bu yürüyüşe izin vermedi.");
+        herkese_durum();
         return;
     }
     gm_tasi(k, x, yy);
@@ -4499,7 +4618,7 @@ static void m_karakter_guncelle(const Json *j)
     agirlik_hesapla(&k->o);
     kirlet();
     bilgileri_guncelle();
-    yayinla_ve_enerji_denetle(k);
+    herkese_durum();
 }
 
 static void m_npc_sil(const Json *j)
@@ -4767,9 +4886,19 @@ static void m_gm_saldiri(Istemci *c, const Json *j)
         istemciye_hata(c, "Saldıranın envanterinden bir eşya seç.");
         return;
     }
+    Esya e = a->o.envanter[i];
     istekleri_temizle(a->id);
-    saldiri_uygula(a, t, i);
-    yayinla_ve_enerji_denetle(a);
+    if (!eyleme_gec(c, a)) { /* henüz yürümediyse yürümeden geçer */
+        herkese_durum();
+        return;
+    }
+    i = esya_bul(a, &e, i);
+    if (i < 0 || !ayni_haritada(a, t)) {
+        istemciye_hata(c, "Saldırı artık yapılamaz (hedef ya da eşya değişti).");
+        herkese_durum();
+        return;
+    }
+    eylem_sonu(a, saldiri_uygula(a, t, i));
 }
 
 /* GM sırası gelen karaktere büyü yaptırır (onay beklemez). */
@@ -4794,8 +4923,16 @@ static void m_gm_buyu(Istemci *c, const Json *j)
         return;
     }
     istekleri_temizle(a->id);
-    buyu_uygula(a, t, ad);
-    yayinla_ve_enerji_denetle(a);
+    if (!eyleme_gec(c, a)) { /* henüz yürümediyse yürümeden geçer */
+        herkese_durum();
+        return;
+    }
+    if (!ayni_haritada(a, t)) {
+        istemciye_hata(c, "Büyü artık yapılamaz (hedef değişti).");
+        herkese_durum();
+        return;
+    }
+    eylem_sonu(a, buyu_uygula(a, t, ad));
 }
 
 /* GM bir karakteri (listeden sürükleyerek) baktığı haritaya koydu. Zaten bu haritadaysa oraya yürür; başka bir
@@ -5900,6 +6037,7 @@ static void m_mac_sifirla(void)
     }
     O.sira.n = 0;
     O.sira.tur_no = 1;
+    O.sira.asama = ASAMA_HAREKET;
     O.sira.toplam_enerji = 0;
     oyunculari_siraya_ekle();
     for (int i = 0; i < O.kayit_n; i++) {
@@ -5952,6 +6090,7 @@ void istemci_mesaj(Istemci *c, const char *metin, size_t n)
         if (!strcmp(t, "istek_iptal")) m_istek_iptal(ben);
         else if (!izin_ver(c)) istemciye_hata(c, "Biraz yavaşla.");
         else if (!strcmp(t, "hareket")) m_hareket(c, ben, j);
+        else if (!strcmp(t, "yurumeden_gec")) m_yurumeden_gec(c, ben);
         else if (!strcmp(t, "saldir")) m_saldir(c, ben, j);
         else if (!strcmp(t, "buyu")) m_buyu(c, ben, j);
         else if (!strcmp(t, "esya_yere")) m_esya_yere(c, ben, j);
@@ -5966,6 +6105,7 @@ void istemci_mesaj(Istemci *c, const char *metin, size_t n)
         else istemciye_hata(c, "Bunu yalnızca GM yapabilir.");
     } else if (!strcmp(t, "istek_onayla")) m_istek_onayla(c, j);
     else if (!strcmp(t, "istek_reddet")) m_istek_reddet(c, j);
+    else if (!strcmp(t, "yurumeden_gec")) m_yurumeden_gec(c, NULL);
     else if (!strcmp(t, "harita_ac")) m_harita_ac(c, j);
     else if (!strcmp(t, "harita_gizle")) {
         HaritaKaydi *h = aktif_harita();
@@ -6317,8 +6457,8 @@ static void durum_json_yaz(Buf *b)
         }
         buf_puts(b, "]}");
     }
-    buf_printf(b, "],\n\"sira\":{\"aktif\":%s,\"indeks\":%d,\"tur\":%d,\"toplam_enerji\":", O.sira.aktif ? "true" : "false",
-               O.sira.indeks, O.sira.tur_no);
+    buf_printf(b, "],\n\"sira\":{\"aktif\":%s,\"indeks\":%d,\"tur\":%d,\"asama\":\"%s\",\"toplam_enerji\":",
+               O.sira.aktif ? "true" : "false", O.sira.indeks, O.sira.tur_no, asama_adi());
     sayi_yaz(b, O.sira.toplam_enerji);
     buf_puts(b, ",\"liste\":[");
     for (int i = 0; i < O.sira.n; i++) buf_printf(b, "%s\"%s\"", i ? "," : "", O.sira.liste[i]);
@@ -6562,6 +6702,8 @@ static void durum_yukle(const Json *d)
     O.sira.aktif = json_mantik(sr, "aktif", 0);
     O.sira.indeks = json_tamsayi(sr, "indeks", &v) ? sinirla(v, -1, O.sira.n - 1) : -1;
     O.sira.tur_no = json_tamsayi(sr, "tur", &v) ? sinirla(v, 1, 1000000) : 1;
+    const char *asama = json_metin(sr, "asama");
+    O.sira.asama = asama && !strcmp(asama, "eylem") ? ASAMA_EYLEM : ASAMA_HAREKET;
     O.sira.toplam_enerji = json_float(sr, "toplam_enerji", 0, 0, AZAMI_STAT);
     if (O.sira.aktif && O.sira.indeks < 0) O.sira.aktif = 0;
 

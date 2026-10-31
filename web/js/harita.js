@@ -47,6 +47,7 @@ export function haritaOlustur(el) {
   const dinleyici = {
     yuru() {},
     yolYok() {},
+    yuruyemez() {},
     tasi() {},
     sec() {},
     isaret() {},
@@ -221,7 +222,7 @@ export function haritaOlustur(el) {
       if (t) portalOynat(efektBaglami, px(t.goster.x, t.goster.y), true);
     }
     for (const id of istekAyar.keys()) if (yeni.istek?.id !== id) istekAyar.delete(id);
-    if (!hareketEdebilir()) onizleme = null;
+    if (!yuruyebilir()) onizleme = null;
     katmanCiz();
     imlec();
   }
@@ -888,10 +889,13 @@ export function haritaOlustur(el) {
 
   // ------------------------------------------------------------ hareket hedefi ve katman
 
-  /** Oyuncu yalnızca kendi sırasında, enerjisi varken yürüyüp saldırabilir. */
-  function hareketEdebilir() {
-    return !gm() && Boolean(harita && benimTokenim()) && !durum.olu && durum.sira.aktif && durum.sira.sirada_ben && (durum.statlar?.enerji ?? 0) > 0;
+  /** Oyuncu yalnızca kendi sırasında saldırıp büyü yapabilir (enerjiye kurallar bakar). */
+  function siraBende() {
+    return !gm() && Boolean(harita && benimTokenim()) && !durum.olu && durum.sira.aktif && durum.sira.sirada_ben;
   }
+
+  /** Yürümek yalnızca sıranın yürüme aşamasında: yürüdükten (ya da yürümeden geçtikten) sonra eylem aşamasıdır. */
+  const yuruyebilir = () => siraBende() && durum.sira.asama !== 'eylem';
 
   /* Hedefler kare ortasına oturur mu: haritanın ayarı ya da konumlar tam sayıysa (Ayarlar, herkes için) */
   const oturtAcik = () => Boolean(harita?.izgara?.oturt || durum?.tam_sayi);
@@ -1063,7 +1067,7 @@ export function haritaOlustur(el) {
   }
 
   function imlec() {
-    gorus.classList.toggle('can-walk', hareketEdebilir());
+    gorus.classList.toggle('can-walk', yuruyebilir());
     gorus.classList.toggle('can-attack', Boolean(hedefUstunde));
   }
 
@@ -1202,8 +1206,8 @@ export function haritaOlustur(el) {
   function uzerinde(e) {
     /* Fare üzerinde dolaşırken: saldırı ya da büyü hedefi mi (kendisi de olabilir), yürüme hedefi mi */
     const t = canliToken(e.target);
-    hedefGuncelle(t && !t.veri.olu && hareketEdebilir() ? t.veri.id : null);
-    if (hareketEdebilir() && !t) {
+    hedefGuncelle(t && !t.veri.olu && siraBende() ? t.veri.id : null);
+    if (yuruyebilir() && !t) {
       const p = dunyaya(e.clientX, e.clientY);
       onizleme = hedefHesapla(p.x, p.y);
     } else {
@@ -1429,7 +1433,10 @@ export function haritaOlustur(el) {
       dinleyici.etkiles(b.id);
       return;
     }
-    if (!hareketEdebilir()) return;
+    if (!yuruyebilir()) {
+      if (siraBende()) dinleyici.yuruyemez(); /* eylem aşaması: bu tur yürüdü */
+      return;
+    }
     const p = dunyaya(e.clientX, e.clientY);
     const hedef = hedefHesapla(p.x, p.y);
     if (!hedef) return;

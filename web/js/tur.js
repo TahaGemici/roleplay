@@ -4,32 +4,39 @@ import { ses } from './ses.js';
 const AZAMI_ISIK = 20;
 
 /**
- * Tur kartı: kimin sırası, sıra şeridi, Fallout'taki gibi yanan enerji ışıkları, bekleyen istek ve "Turu bitir".
- * GM için enerji düzeltme, sırayı geçme ve durdurma düğmeleri de burada.
+ * Tur kartı: kimin sırası, sıra şeridi, Fallout'taki gibi yanan enerji ışıkları, turun iki aşaması (önce yürü, sonra
+ * eylem), bekleyen istek, "Yürümeden geç" ve "Turu bitir". GM için enerji düzeltme, sırayı geçme ve durdurma düğmeleri
+ * de burada.
  */
 export function turKartiOlustur(kok, { gonder, yolUzunlugu }) {
   let durum = null;
   let sonSiradaki = null;
 
-  /* Işıklar kesirli dolar: 3,5 enerji = üç tam, bir yarım ışık. */
-  function isiklar(enerji, toplam) {
-    const n = Math.min(Math.ceil(Math.max(toplam, enerji, 0) - 1e-6), AZAMI_ISIK);
-    const kap = h('div', { class: 'ap-pips', role: 'img', 'aria-label': `${sayiYaz(enerji)} / ${sayiYaz(toplam)} enerji` });
+  /* Işıklar kesirli dolar: 3,5 enerji = üç tam, bir yarım ışık. Enerjinin azamisi varsa o kadar ışık; yoksa sıra
+     başındaki enerji kadar (enerji ondan fazlaysa enerji kadar). */
+  function enerjiSatiri(statlar, toplam) {
+    const enerji = statlar.enerji;
+    const azami = statlar.azami?.enerji > 0 ? statlar.azami.enerji : 0;
+    const n = Math.min(Math.ceil(Math.max(azami || toplam, enerji, 0) - 1e-6), AZAMI_ISIK);
+    const kap = h('div', { class: 'ap-pips', role: 'img', 'aria-label': `${statYaz(statlar, 'enerji')} enerji` });
     for (let i = 0; i < n; i++) {
       const yanik = sinirla(enerji - i, 0, 1);
       kap.append(h('span', { class: `pip${yanik > 0 ? ' is-on' : ''}`, vars: { '--lit': String(yanik) } }));
     }
-    return kap;
+    return h('div', { class: 'ap' }, h('span', { class: 'ap-label', text: 'Enerji' }), kap, h('span', { class: 'ap-num', text: statYaz(statlar, 'enerji') }));
   }
 
-  function enerjiSatiri(enerji, toplam) {
-    return h(
-      'div',
-      { class: 'ap' },
-      h('span', { class: 'ap-label', text: 'Enerji' }),
-      isiklar(enerji, toplam),
-      h('span', { class: 'ap-num', text: `${sayiYaz(Math.max(0, enerji))}/${sayiYaz(toplam)}` }),
-    );
+  /* Turun aşamaları: 1 Yürü, 2 Eylem (saldırı ya da büyü); biten aşama ✓ olur. */
+  function asamalar(asama) {
+    const eylemde = asama === 'eylem';
+    const adim = (no, ad, simdiki, bitti) =>
+      h(
+        'li',
+        { class: `turn-step${simdiki ? ' is-current' : ''}${bitti ? ' is-done' : ''}`, 'aria-current': simdiki ? 'step' : null },
+        h('span', { class: 'step-num', 'aria-hidden': 'true', text: bitti ? '✓' : String(no) }),
+        h('span', { class: 'step-name', text: ad }),
+      );
+    return h('ol', { class: 'turn-steps', 'aria-label': 'Turun aşamaları' }, adim(1, 'Yürü', !eylemde, eylemde), adim(2, 'Eylem', eylemde, false));
   }
 
   function bekleyenIstek(ist) {
@@ -102,7 +109,7 @@ export function turKartiOlustur(kok, { gonder, yolUzunlugu }) {
         h('p', { class: 'turn-who', vars: { '--c': k?.renk || 'var(--bone)' }, text: k ? (k.npc ? `${k.ad} (NPC)` : k.ad) : '—' }),
         gmSeridi(s),
       );
-      if (k) kok.append(enerjiSatiri(k.statlar.enerji, s.toplam_enerji));
+      if (k) kok.append(enerjiSatiri(k.statlar, s.toplam_enerji), asamalar(s.asama));
       kok.append(
         h(
           'div',
@@ -115,11 +122,23 @@ export function turKartiOlustur(kok, { gonder, yolUzunlugu }) {
             : null,
           h('span', { class: 'spacer' }),
           k?.harita && !k.burada ? h('button', { class: 'btn btn-sm btn-ghost', type: 'button', title: `${k.ad} başka bir haritada`, onclick: () => gonder({ t: 'harita_ac', dosya: k.harita }), text: 'Haritasına git' }) : null,
-          h('button', { class: 'btn btn-sm', type: 'button', onclick: () => gonder({ t: 'tur_bitir' }), text: 'Sıradakine geç' }),
+          k?.npc && s.asama !== 'eylem'
+            ? h('button', { class: 'btn btn-sm btn-ghost', type: 'button', title: 'NPC bu tur yürümez; eylem aşaması başlar', onclick: () => gonder({ t: 'yurumeden_gec' }), text: 'Yürümeden geç' })
+            : null,
+          h('button', { class: 'btn btn-sm', type: 'button', title: 'Eylem yapmadan sırasını bitirir', onclick: () => gonder({ t: 'tur_bitir' }), text: 'Sıradakine geç' }),
           h('button', { class: 'btn btn-sm btn-ghost', type: 'button', onclick: () => gonder({ t: 'sira_durdur' }), text: 'Durdur' }),
         ),
       );
-      if (k?.npc) kok.append(h('p', { class: 'hint turn-hint', text: 'NPC\'nin sırası: onu sürükleyerek yürüt, Karakterler bölümünden saldırt ya da büyü yaptır, bitince "Sıradakine geç".' }));
+      if (k?.npc)
+        kok.append(
+          h('p', {
+            class: 'hint turn-hint',
+            text:
+              s.asama !== 'eylem'
+                ? 'NPC\'nin sırası: önce onu sürükleyerek yürüt ya da "Yürümeden geç". Sonra Karakterler bölümünden saldırt ya da büyü yaptır.'
+                : 'NPC yürüdü: Karakterler bölümünden saldırt ya da büyü yaptır (olunca sırası biter) ya da "Sıradakine geç".',
+          }),
+        );
       return;
     }
 
@@ -132,11 +151,27 @@ export function turKartiOlustur(kok, { gonder, yolUzunlugu }) {
       oyuncuSeridi(s, durum.ben),
     );
     if (benim) {
-      kok.append(enerjiSatiri(durum.statlar.enerji, s.toplam_enerji));
+      const eylemde = s.asama === 'eylem';
+      kok.append(enerjiSatiri(durum.statlar, s.toplam_enerji), asamalar(s.asama));
       const b = bekleyenIstek(durum.istek);
       if (b) kok.append(b);
-      else kok.append(h('p', { class: 'hint turn-hint', text: 'Yürümek için haritada bir yere, saldırmak ya da büyü yapmak için bir karaktere (kendine büyü için kendine) tıkla. İsteğin GM\'e gider.' }));
-      kok.append(h('button', { class: 'btn btn-primary end-turn', type: 'button', onclick: () => gonder({ t: 'tur_bitir' }), text: 'Turu bitir' }));
+      else
+        kok.append(
+          h('p', {
+            class: 'hint turn-hint',
+            text: eylemde
+              ? 'Şimdi eylem: saldırmak ya da büyü yapmak için bir karaktere (kendine büyü için kendine) tıkla. Olunca turun biter; eylem yapmayacaksan turu bitir.'
+              : 'Önce yürü: haritada bir yere tıkla ya da yürümeden geç. Sonra saldırmak ya da büyü yapmak için bir karaktere tıkla. İsteklerin GM\'e gider.',
+          }),
+        );
+      kok.append(
+        h(
+          'div',
+          { class: 'turn-actions' },
+          eylemde ? null : h('button', { class: 'btn skip-walk', type: 'button', title: 'Bu tur yürümezsin; eylem aşaması başlar', onclick: () => gonder({ t: 'yurumeden_gec' }), text: 'Yürümeden geç' }),
+          h('button', { class: 'btn btn-primary end-turn', type: 'button', title: 'Eylem yapmadan turunu bitirirsin', onclick: () => gonder({ t: 'tur_bitir' }), text: 'Turu bitir' }),
+        ),
+      );
     }
   }
 
